@@ -1,0 +1,17 @@
+# Multi-Client Real-Time Communication System
+# Python Dependencies
+
+# GUI
+PyQt5>=5.15.0
+
+# Video processing
+opencv-python>=4.8.0
+
+# Audio processing
+PyAudio>=0.2.13
+
+# Plotting
+matplotlib>=3.7.0
+
+# Required for numpy (used by OpenCV)
+numpy>=1.24.0
