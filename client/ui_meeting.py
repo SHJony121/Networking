@@ -235,6 +235,7 @@ class MeetingScreen(QWidget):
         if participant_id not in self.video_widgets:
             widget = VideoWidget(participant_name)
             self.video_widgets[participant_id] = widget
+            print(f"[MeetingScreen] Added widget for {participant_id}, visible={self.isVisible()}, window visible={self.window().isVisible()}")
             
             # Arrange in grid
             self._rearrange_video_grid()
@@ -263,11 +264,21 @@ class MeetingScreen(QWidget):
         cols = int(np.ceil(np.sqrt(count)))
         rows = int(np.ceil(count / cols))
         
+        print(f"[MeetingScreen] Rearranging {count} videos in {rows}x{cols} grid")
+        
         # Add widgets to grid
-        for idx, widget in enumerate(self.video_widgets.values()):
+        for idx, (participant_id, widget) in enumerate(self.video_widgets.items()):
             row = idx // cols
             col = idx % cols
+            print(f"[MeetingScreen] Placing {participant_id} at ({row}, {col})")
+            widget.show()  # Explicitly show the widget
             self.video_grid.addWidget(widget, row, col)
+        
+        # Force layout update
+        self.video_grid.update()
+        self.video_container.updateGeometry()
+        self.video_scroll.updateGeometry()
+        self.update()  # Force repaint
     
     def update_video_frame(self, participant_id, frame):
         """Update video frame for a participant"""

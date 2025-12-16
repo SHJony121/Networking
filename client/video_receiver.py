@@ -28,6 +28,10 @@ class VideoReceiver:
         self.latest_frame = None
         self.latest_frame_lock = threading.Lock()
         
+        # Per-sender frame storage: {sender_addr: latest_frame}
+        self.sender_frames = {}
+        self.sender_frames_lock = threading.Lock()
+        
         # Stats tracking
         self.frames_received = 0
         self.bytes_received = 0
@@ -77,9 +81,13 @@ class VideoReceiver:
         """Main receiving loop"""
         self.socket.settimeout(0.1)
         
+        received_count = 0
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(65535)
+                received_count += 1
+                if received_count % 100 == 0:  # Log every 100 packets
+                    print(f"[VideoReceiver] Received {received_count} packets, latest from {addr}")
                 self._process_packet(data, addr)
             
             except socket.timeout:
@@ -124,9 +132,13 @@ class VideoReceiver:
             frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
             
             if frame is not None:
-                # Update latest frame
+                # Update latest frame (backward compatibility)
                 with self.latest_frame_lock:
                     self.latest_frame = frame
+                
+                # Store frame per sender
+                with self.sender_frames_lock:
+                    self.sender_frames[addr] = frame
                 
                 # Update stats
                 self.frames_received += 1
@@ -144,6 +156,13 @@ class VideoReceiver:
     
     def get_latest_frame(self):
         """Get the most recent frame (thread-safe)"""
+        with self.latest_frame_lock:
+            return self.latest_frame
+    
+    def get_all_sender_frames(self):
+        """Get frames from all senders: returns {addr: frame}"""
+        with self.sender_frames_lock:
+            return dict(self.sender_frames)  # Return a copy
         with self.latest_frame_lock:
             return self.latest_frame.copy() if self.latest_frame is not None else None
     

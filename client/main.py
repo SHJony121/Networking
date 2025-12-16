@@ -27,6 +27,7 @@ class ClientApplication(QStackedWidget):
     
     # Signal for thread-safe join request handling
     join_request_signal = pyqtSignal(str)  # client_name
+    participant_joined_signal = pyqtSignal(str)  # participant_name
     
     def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001):
         super().__init__()
@@ -48,6 +49,10 @@ class ClientApplication(QStackedWidget):
         self.audio_sender = None
         self.audio_receiver = None
         self.stats_collector = None
+        
+        # Connect signals to main-thread handlers
+        self.join_request_signal.connect(self._handle_join_request_ui)
+        self.participant_joined_signal.connect(self._handle_participant_joined_ui)
         self.file_transfer = None
         self.file_receiver = None
         
@@ -91,6 +96,12 @@ class ClientApplication(QStackedWidget):
             QMessageBox.critical(self, "Error", "Failed to connect to server")
             return
         
+        # Register handlers FIRST (including for participants joining)
+        self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
+        self.session.tcp_control.register_handler(MSG_NEW_JOIN_REQUEST, self.on_new_join_request)
+        
         # Create meeting
         meeting_code = self.session.create_meeting(name)
         if not meeting_code:
@@ -102,12 +113,6 @@ class ClientApplication(QStackedWidget):
         self.waiting_room.allow_participant_signal.connect(self.on_allow_participant)
         self.waiting_room.deny_participant_signal.connect(self.on_deny_participant)
         self.waiting_room.start_meeting_signal.connect(self.on_enter_meeting)
-        
-        # Register handler for join requests
-        self.session.tcp_control.register_handler(
-            MSG_NEW_JOIN_REQUEST,
-            self.on_new_join_request
-        )
         
         self.addWidget(self.waiting_room)
         self.setCurrentWidget(self.waiting_room)
@@ -126,7 +131,12 @@ class ClientApplication(QStackedWidget):
             QMessageBox.critical(self, "Error", "Failed to connect to server")
             return
         
-        # Join meeting
+        # Register handlers FIRST (before joining, so we catch messages)
+        self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
+        
+        # Now join meeting
         QMessageBox.information(self, "Joining", "Requesting to join meeting...")
         
         if self.session.join_meeting(meeting_code, name):
@@ -178,13 +188,12 @@ class ClientApplication(QStackedWidget):
     
     def on_enter_meeting(self):
         """Enter the meeting room"""
-        # Create meeting screen first
+        # Create meeting screen
         self.meeting_screen = MeetingScreen()
-        
-        # Set initial mic/camera states
         self.meeting_screen.set_mic_state(self.mic_enabled)
         self.meeting_screen.set_camera_state(self.camera_enabled)
         
+        # Connect signals
         self.meeting_screen.send_chat_signal.connect(self.on_send_chat)
         self.meeting_screen.send_file_signal.connect(self.on_send_file)
         self.meeting_screen.toggle_mic_signal.connect(self.on_toggle_mic)
@@ -196,10 +205,15 @@ class ClientApplication(QStackedWidget):
         self.meeting_screen.timer.timeout.disconnect()  # Disconnect old connection
         self.meeting_screen.timer.timeout.connect(self.update_video_frames)  # Connect to our method
         
-        # Add own video
+        # Add own video box
         self.meeting_screen.add_video_stream('self', self.client_name)
         
-        # Register message handlers
+        # Add any buffered participants that joined before meeting screen was ready
+        if hasattr(self, 'pending_participants'):
+            print(f"[Client] Adding {len(self.pending_participants)} buffered participants")
+            for participant_name in self.pending_participants:
+                self.meeting_screen.add_video_stream(participant_name, participant_name)
+            self.pending_participants = []
         self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
@@ -267,7 +281,7 @@ class ClientApplication(QStackedWidget):
     
     def update_video_frames(self):
         """Update video frames in meeting screen"""
-        if not self.video_sender or not self.meeting_screen:
+        if not self.meeting_screen:
             return
         
         # Update own video from video sender's latest frame (only if camera is enabled)
@@ -276,11 +290,24 @@ class ClientApplication(QStackedWidget):
             if frame is not None:
                 self.meeting_screen.update_video_frame('self', frame)
         
-        # Update received video (simplified - single stream)
+        # Update received video streams for other participants
         if self.video_receiver:
-            frame = self.video_receiver.get_latest_frame()
-            if frame is not None:
-                self.meeting_screen.update_video_frame('other', frame)
+            sender_frames = self.video_receiver.get_all_sender_frames()
+            
+            # Get list of other participants (not self)
+            other_participants = [pid for pid in self.meeting_screen.video_widgets.keys() if pid != 'self']
+            
+            # Assign received frames to participant boxes
+            frame_list = list(sender_frames.values())
+            
+            # Only update if we have frames AND participants
+            if frame_list and other_participants:
+                # For now, just show the latest received frame in the first participant box
+                # (This is a limitation - we can't distinguish which frame belongs to which participant
+                # without proper UDP address mapping, which requires REGISTER_UDP to work properly)
+                for idx, participant_id in enumerate(other_participants):
+                    if idx < len(frame_list):
+                        self.meeting_screen.update_video_frame(participant_id, frame_list[idx])
     
     def on_send_chat(self, message):
         """Send chat message"""
@@ -331,11 +358,32 @@ class ClientApplication(QStackedWidget):
             self.stats_window.show()
     
     def on_participant_joined(self, msg):
-        """Handle participant joined"""
+        """Handle participant joined (called from TCP thread)"""
         participant_name = msg.get('participant_name')
+        print(f"[Client] PARTICIPANT_JOINED received: {participant_name}, my name: {self.client_name}")
+        
+        # Don't add yourself again
+        if participant_name == self.client_name:
+            print(f"[Client] Skipping own name")
+            return
+        
+        # Emit signal to handle in main Qt thread
+        self.participant_joined_signal.emit(participant_name)
+    
+    def _handle_participant_joined_ui(self, participant_name):
+        """Handle participant joined in main Qt thread"""
         if self.meeting_screen:
+            print(f"[Client] Adding video box for {participant_name}")
+            print(f"[Client] Current video_widgets BEFORE add: {list(self.meeting_screen.video_widgets.keys())}")
             self.meeting_screen.add_video_stream(participant_name, participant_name)
+            print(f"[Client] Current video_widgets AFTER add: {list(self.meeting_screen.video_widgets.keys())}")
             self.meeting_screen.add_chat_message("System", f"{participant_name} joined")
+        else:
+            # Buffer participants that joined before meeting screen was created
+            print(f"[Client] Buffering participant {participant_name} (meeting screen not ready yet)")
+            if not hasattr(self, 'pending_participants'):
+                self.pending_participants = []
+            self.pending_participants.append(participant_name)
     
     def on_participant_left(self, msg):
         """Handle participant left"""

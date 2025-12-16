@@ -150,6 +150,8 @@ class VideoSender:
             
             # Send packet
             packet = header + payload
+            if self.frames_sent == 0:  # Log first packet
+                print(f"[VideoSender] Sending first packet to {self.server_host}:{self.server_udp_port}, size={len(packet)} bytes")
             self.socket.sendto(packet, (self.server_host, self.server_udp_port))
             
             # Update counters

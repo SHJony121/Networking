@@ -18,9 +18,9 @@ class StreamRelayUDP:
         self.socket = None
         self.running = False
         
-        # Track UDP addresses for clients
-        # {client_udp_addr: client_socket}
-        self.udp_to_socket = {}
+        # Track UDP sending addresses: {sender_addr: last_seen_time}
+        self.active_udp_addresses = {}
+        self.udp_lock = threading.Lock()
     
     def start(self):
         """Start the UDP relay server"""
@@ -29,10 +29,16 @@ class StreamRelayUDP:
         self.running = True
         
         print(f"[StreamRelay] UDP relay listening on port {self.udp_port}")
+        print(f"[StreamRelay] Socket bound to {self.socket.getsockname()}")
         
+        packet_count = 0
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(65535)  # Max UDP packet size
+                packet_count += 1
+                
+                if packet_count % 100 == 0:  # Log every 100 packets
+                    print(f"[StreamRelay] Received {packet_count} UDP packets")
                 
                 # Handle packet in separate thread to avoid blocking
                 threading.Thread(
@@ -74,78 +80,69 @@ class StreamRelayUDP:
             print(f"[StreamRelay] Error handling packet from {sender_addr}: {e}")
     
     def relay_video_packet(self, data, sender_addr):
-        """Relay video packet to all participants in the same meeting"""
-        # Find sender's meeting
-        client_socket = self.find_client_by_udp_addr(sender_addr)
-        if not client_socket:
-            # First packet from this client, try to register
-            self.register_udp_addr(sender_addr)
-            client_socket = self.find_client_by_udp_addr(sender_addr)
-            if not client_socket:
-                return
+        """Relay video packet to ALL other clients' REGISTERED receiver addresses"""
+        import time
         
-        client_info = self.meeting_manager.get_client_info(client_socket)
-        if not client_info:
-            return
+        # Track sender as active
+        with self.udp_lock:
+            self.active_udp_addresses[sender_addr] = time.time()
         
-        meeting_code = client_info['meeting']
+        # Find which client is sending (by matching IP)
+        sender_ip = sender_addr[0]
+        sender_client_socket = None
         
-        # Get all participants in the meeting
-        participants = self.meeting_manager.get_meeting_participants(meeting_code)
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+            udp_addr = client_info.get('udp_addr')
+            if udp_addr and udp_addr[0] == sender_ip:
+                # Check if sender port is close to registered port (within 10 ports)
+                port_diff = abs(udp_addr[1] - sender_addr[1])
+                if port_diff < 10:  # Same client (sender/receiver ports are close)
+                    sender_client_socket = client_socket
+                    break
         
-        # Relay to all participants except sender
-        for participant_socket in participants:
-            if participant_socket != client_socket:
-                participant_info = self.meeting_manager.get_client_info(participant_socket)
-                if participant_info and participant_info.get('udp_addr'):
-                    try:
-                        self.socket.sendto(data, participant_info['udp_addr'])
-                    except Exception as e:
-                        print(f"[StreamRelay] Failed to relay video to {participant_info['udp_addr']}: {e}")
+        # Get ALL registered UDP addresses EXCEPT the sender
+        recipient_addrs = []
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+            if client_socket == sender_client_socket:
+                continue  # Skip sender
+            
+            udp_addr = client_info.get('udp_addr')
+            if udp_addr:
+                recipient_addrs.append((udp_addr, client_info.get('name', 'unknown')))
+        
+        print(f"[StreamRelay] Video from {sender_addr}, relaying to {len(recipient_addrs)} registered receivers (excluding sender)")
+        
+        # Relay to registered receiver addresses
+        for udp_addr, name in recipient_addrs:
+            try:
+                self.socket.sendto(data, udp_addr)
+            except Exception as e:
+                print(f"[StreamRelay] Failed to relay video to {name} at {udp_addr}: {e}")
+        
+        if len(recipient_addrs) == 0:
+            print(f"[StreamRelay] WARNING: No registered recipients to relay video to!")
     
     def relay_audio_packet(self, data, sender_addr):
-        """Relay audio packet to all participants in the same meeting"""
-        # Similar to video relay
-        client_socket = self.find_client_by_udp_addr(sender_addr)
-        if not client_socket:
-            self.register_udp_addr(sender_addr)
-            client_socket = self.find_client_by_udp_addr(sender_addr)
-            if not client_socket:
-                return
+        """Relay audio packet to ALL other clients' REGISTERED receiver addresses"""
+        import time
         
-        client_info = self.meeting_manager.get_client_info(client_socket)
-        if not client_info:
-            return
+        # Track sender as active
+        with self.udp_lock:
+            self.active_udp_addresses[sender_addr] = time.time()
         
-        meeting_code = client_info['meeting']
-        participants = self.meeting_manager.get_meeting_participants(meeting_code)
-        
-        # Relay to all participants except sender
-        for participant_socket in participants:
-            if participant_socket != client_socket:
-                participant_info = self.meeting_manager.get_client_info(participant_socket)
-                if participant_info and participant_info.get('udp_addr'):
-                    try:
-                        self.socket.sendto(data, participant_info['udp_addr'])
-                    except Exception as e:
-                        print(f"[StreamRelay] Failed to relay audio to {participant_info['udp_addr']}: {e}")
-    
-    def find_client_by_udp_addr(self, udp_addr):
-        """Find client socket by UDP address"""
-        # Search through all clients to find matching UDP address
+        # Get ALL registered UDP addresses from meeting_manager
+        recipient_addrs = []
         for client_socket, client_info in self.meeting_manager.client_info.items():
-            if client_info.get('udp_addr') == udp_addr:
-                return client_socket
-        return None
-    
-    def register_udp_addr(self, udp_addr):
-        """Register a new UDP address (called on first packet)"""
-        # This is a simplified registration - in production, clients should
-        # send their UDP address through TCP control channel first
-        print(f"[StreamRelay] New UDP address detected: {udp_addr}")
-        # The client should have already registered via TCP, so we just
-        # update the UDP address in meeting_manager
-        # This is handled when client sends first packet
+            udp_addr = client_info.get('udp_addr')
+            if udp_addr and udp_addr != sender_addr:  # Don't send back to sender
+                recipient_addrs.append(udp_addr)
+        
+        # Relay to registered receiver addresses
+        for udp_addr in recipient_addrs:
+            try:
+                self.socket.sendto(data, udp_addr)
+            except Exception as e:
+                print(f"[StreamRelay] Failed to relay audio to {udp_addr}: {e}")
     
     def stop(self):
         """Stop the UDP relay"""

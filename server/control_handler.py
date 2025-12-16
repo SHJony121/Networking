@@ -163,16 +163,32 @@ class ControlHandler:
         if allowed_socket:
             success = self.meeting_manager.allow_join(allowed_socket)
             if success:
-                # Notify the allowed client
+                client_info = self.meeting_manager.get_client_info(allowed_socket)
+                meeting_code = client_info['meeting']
+                
+                # Send JOIN_ACCEPTED to the new participant
                 response = pack_tcp_message(MSG_JOIN_ACCEPTED)
                 try:
                     allowed_socket.sendall(response)
                 except:
                     pass
                 
-                # Broadcast to all participants that someone joined
-                client_info = self.meeting_manager.get_client_info(allowed_socket)
-                meeting_code = client_info['meeting']
+                # Send list of EXISTING participants to the new joiner
+                participants = self.meeting_manager.get_meeting_participants(meeting_code)
+                for participant_socket in participants:
+                    if participant_socket != allowed_socket:  # Don't send their own name
+                        participant_info = self.meeting_manager.get_client_info(participant_socket)
+                        if participant_info:
+                            existing_msg = pack_tcp_message(
+                                MSG_PARTICIPANT_JOINED,
+                                participant_name=participant_info['name']
+                            )
+                            try:
+                                allowed_socket.sendall(existing_msg)
+                            except:
+                                pass
+                
+                # Broadcast to ALL participants (including new joiner) that someone joined
                 self.broadcast_to_meeting(
                     meeting_code,
                     MSG_PARTICIPANT_JOINED,
