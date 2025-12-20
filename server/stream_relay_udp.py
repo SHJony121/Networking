@@ -110,7 +110,13 @@ class StreamRelayUDP:
             if udp_addr:
                 recipient_addrs.append((udp_addr, client_info.get('name', 'unknown')))
         
+        # Debug: Show registered clients
         print(f"[StreamRelay] Video from {sender_addr}, relaying to {len(recipient_addrs)} registered receivers (excluding sender)")
+        if len(recipient_addrs) == 0:
+            print(f"[StreamRelay] WARNING: No registered recipients to relay video to!")
+            print(f"[StreamRelay] DEBUG: Registered clients:")
+            for client_socket, client_info in self.meeting_manager.client_info.items():
+                print(f"  - {client_info.get('name', 'unknown')}: udp_addr={client_info.get('udp_addr', 'NOT SET')}")
         
         # Relay to registered receiver addresses
         for udp_addr, name in recipient_addrs:

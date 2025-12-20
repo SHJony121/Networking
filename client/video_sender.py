@@ -50,13 +50,29 @@ class VideoSender:
     def start(self):
         """Start video capture and sending"""
         print(f"[VideoSender] Attempting to open camera {self.camera_index}...")
-        self.camera = cv2.VideoCapture(self.camera_index)
+        
+        # Use DirectShow backend for better compatibility with virtual cameras (iVCam)
+        # CAP_DSHOW works better than default MSMF backend
+        self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         
         if not self.camera.isOpened():
-            print(f"[VideoSender] Failed to open camera {self.camera_index}")
+            print(f"[VideoSender] Failed to open camera {self.camera_index} with DirectShow backend")
+            # Try default backend as fallback
+            print(f"[VideoSender] Trying default backend...")
+            self.camera = cv2.VideoCapture(self.camera_index)
+            if not self.camera.isOpened():
+                print(f"[VideoSender] Failed to open camera {self.camera_index} with any backend")
+                return False
+        
+        # Test if we can actually read a frame
+        ret, test_frame = self.camera.read()
+        if not ret or test_frame is None:
+            print(f"[VideoSender] Camera {self.camera_index} opened but can't read frames!")
+            self.camera.release()
             return False
         
-        print(f"[VideoSender] Camera opened successfully")
+        print(f"[VideoSender] Camera {self.camera_index} opened successfully and tested")
+        print(f"[VideoSender] Camera resolution: {int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
         
         self.running = True
         self.send_thread = threading.Thread(target=self._send_loop, daemon=True)
@@ -118,9 +134,18 @@ class VideoSender:
                 print("[VideoSender] Failed to read frame from camera")
                 return
             
-            # Debug: Log first frame capture
+            # Debug: Log first frame capture and check if frame is black
             if self.frames_sent == 0:
                 print(f"[VideoSender] First frame captured: {frame.shape}")
+                # Check if frame is completely black or nearly black
+                mean_brightness = frame.mean()
+                print(f"[VideoSender] Frame brightness: {mean_brightness:.2f} (0=black, 255=white)")
+                if mean_brightness < 5:
+                    print(f"[VideoSender] WARNING: Camera is capturing BLACK frames! Check:")
+                    print(f"  1. iVCam app is running on phone")
+                    print(f"  2. Camera permissions are granted")
+                    print(f"  3. Phone camera is not covered")
+                    print(f"  4. Try closing/reopening iVCam app")
             
             # Store original frame for local display
             with self.frame_lock:

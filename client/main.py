@@ -227,8 +227,14 @@ class ClientApplication(QStackedWidget):
     
     def init_streaming(self):
         """Initialize video/audio streaming"""
-        # Video sender
-        self.video_sender = VideoSender(self.server_host, self.server_udp_port)
+        # Video sender - allow setting camera index via environment variable
+        # Set CAMERA_INDEX environment variable before starting client, default is 0
+        # For example: set CAMERA_INDEX=1 (for iVCam on Windows)
+        import os
+        camera_index = int(os.environ.get('CAMERA_INDEX', 0))
+        print(f"[Client] Using camera index: {camera_index}")
+        
+        self.video_sender = VideoSender(self.server_host, self.server_udp_port, camera_index=camera_index)
         if self.camera_enabled:
             self.video_sender.start()
         else:
@@ -272,6 +278,9 @@ class ClientApplication(QStackedWidget):
                 self.audio_receiver.local_udp_port
             )
             print("[Client] UDP ports registered successfully")
+            print(f"[Client] Waiting 1 second for server to process registration...")
+            import time
+            time.sleep(1)  # Give server time to register ports
         except Exception as e:
             print(f"[Client] Failed to register UDP ports: {e}")
             import traceback
@@ -431,8 +440,14 @@ def main():
     parser.add_argument('--server', default='127.0.0.1', help='Server address (default: 127.0.0.1)')
     parser.add_argument('--tcp-port', type=int, default=5000, help='Server TCP port (default: 5000)')
     parser.add_argument('--udp-port', type=int, default=5001, help='Server UDP port (default: 5001)')
+    parser.add_argument('--camera', type=int, help='Camera index (e.g., 0 for laptop, 1 for iVCam)')
     
     args = parser.parse_args()
+    
+    # Set camera index if provided via command line
+    if args.camera is not None:
+        os.environ['CAMERA_INDEX'] = str(args.camera)
+        print(f"[Main] Camera index set to: {args.camera}")
     
     app = QApplication(sys.argv)
     client = ClientApplication(
