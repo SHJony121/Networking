@@ -174,6 +174,7 @@ class ControlHandler:
                     pass
                 
                 # Send list of EXISTING participants to the new joiner
+                # Send list of EXISTING participants to the new joiner
                 participants = self.meeting_manager.get_meeting_participants(meeting_code)
                 for participant_socket in participants:
                     if participant_socket != allowed_socket:  # Don't send their own name
@@ -181,7 +182,8 @@ class ControlHandler:
                         if participant_info:
                             existing_msg = pack_tcp_message(
                                 MSG_PARTICIPANT_JOINED,
-                                participant_name=participant_info['name']
+                                participant_name=participant_info['name'],
+                                is_host=participant_info.get('is_host', False)
                             )
                             try:
                                 allowed_socket.sendall(existing_msg)
@@ -192,7 +194,8 @@ class ControlHandler:
                 self.broadcast_to_meeting(
                     meeting_code,
                     MSG_PARTICIPANT_JOINED,
-                    participant_name=client_info['name']
+                    participant_name=client_info['name'],
+                    is_host=client_info.get('is_host', False)
                 )
     
     def handle_deny_join(self, client_socket, msg):
@@ -225,73 +228,101 @@ class ControlHandler:
         message_text = msg.get('message')
         sender_name = client_info['name']
         
-        # Broadcast to all participants in the meeting
-        self.broadcast_to_meeting(
-            meeting_code,
-            MSG_CHAT_BROADCAST,
-            sender_name=sender_name,
-            message=message_text
-        )
+        target_name = msg.get('target_name')
+        
+        if target_name and target_name != "Everyone":
+            # Private message
+            participants = self.meeting_manager.get_meeting_participants(meeting_code)
+            target_socket = None
+            
+            # Find target socket
+            for p_socket in participants:
+                p_info = self.meeting_manager.get_client_info(p_socket)
+                if p_info and p_info['name'] == target_name:
+                    target_socket = p_socket
+                    break
+            
+            if target_socket:
+                # Send to target
+                msg_to_target = pack_tcp_message(
+                    MSG_CHAT_BROADCAST,
+                    sender_name=sender_name,
+                    message=message_text,
+                    is_private=True,
+                    recipient=target_name 
+                )
+                try:
+                    target_socket.sendall(msg_to_target)
+                except:
+                    pass
+                
+                # Send back to sender (so they see it too)
+                # We format it slightly differently or let client handle it
+                # For simplicity, let's send same msg to sender but client knows they sent it
+                try:
+                    client_socket.sendall(msg_to_target)
+                except:
+                    pass
+        else:
+            # Broadcast to all participants in the meeting
+            self.broadcast_to_meeting(
+                meeting_code,
+                MSG_CHAT_BROADCAST,
+                sender_name=sender_name,
+                message=message_text,
+                is_private=False
+            )
     
+    def forward_file_message(self, client_socket, msg, msg_type_out):
+        """Helper to forward file messages to target or broadcast"""
+        client_info = self.meeting_manager.get_client_info(client_socket)
+        if not client_info:
+            return
+            
+        meeting_code = client_info['meeting']
+        target_name = msg.get('target_name')
+        
+        if target_name and target_name != "Everyone":
+            # Private forwarding
+            participants = self.meeting_manager.get_meeting_participants(meeting_code)
+            target_socket = None
+            for p_socket in participants:
+                p_info = self.meeting_manager.get_client_info(p_socket)
+                if p_info and p_info['name'] == target_name:
+                    target_socket = p_socket
+                    break
+            
+            if target_socket:
+                start_msg = pack_tcp_message(
+                    msg_type_out,
+                    sender_name=client_info['name'],
+                    **{k:v for k,v in msg.items() if k != 'type'}
+                )
+                try:
+                    target_socket.sendall(start_msg)
+                except:
+                    pass
+        else:
+            # Broadcast
+            self.broadcast_to_meeting(
+                meeting_code,
+                msg_type_out,
+                sender_name=client_info['name'],
+                exclude_socket=client_socket,
+                **{k:v for k,v in msg.items() if k != 'type'}
+            )
+
     def handle_file_start(self, client_socket, msg):
         """Handle FILE_START message"""
-        client_info = self.meeting_manager.get_client_info(client_socket)
-        if not client_info:
-            return
-        
-        meeting_code = client_info['meeting']
-        filename = msg.get('filename')
-        filesize = msg.get('filesize')
-        
-        # Notify all participants
-        self.broadcast_to_meeting(
-            meeting_code,
-            MSG_FILE_START_NOTIFY,
-            sender_name=client_info['name'],
-            filename=filename,
-            filesize=filesize,
-            exclude_socket=client_socket
-        )
+        self.forward_file_message(client_socket, msg, MSG_FILE_START_NOTIFY)
     
     def handle_file_chunk(self, client_socket, msg):
-        """Handle FILE_CHUNK message and forward to participants"""
-        client_info = self.meeting_manager.get_client_info(client_socket)
-        if not client_info:
-            return
-        
-        meeting_code = client_info['meeting']
-        
-        # Forward chunk to all participants except sender
-        self.broadcast_to_meeting(
-            meeting_code,
-            MSG_FILE_CHUNK_FORWARD,
-            chunk_id=msg.get('chunk_id'),
-            data=msg.get('data'),
-            exclude_socket=client_socket
-        )
-    
-    def handle_file_ack(self, client_socket, msg):
-        """Handle FILE_ACK from receiver (forward to sender)"""
-        # In this architecture, ACKs go back through server
-        # Implementation depends on file transfer design
-        pass
+        """Handle FILE_CHUNK message"""
+        self.forward_file_message(client_socket, msg, MSG_FILE_CHUNK_FORWARD)
     
     def handle_file_end(self, client_socket, msg):
         """Handle FILE_END message"""
-        client_info = self.meeting_manager.get_client_info(client_socket)
-        if not client_info:
-            return
-        
-        meeting_code = client_info['meeting']
-        
-        # Notify all participants
-        self.broadcast_to_meeting(
-            meeting_code,
-            MSG_FILE_END_NOTIFY,
-            sender_name=client_info['name'],
-            checksum=msg.get('checksum'),
-            exclude_socket=client_socket
-        )
+        self.forward_file_message(client_socket, msg, MSG_FILE_END_NOTIFY)
     
     def handle_video_stats(self, client_socket, msg):
         """Handle VIDEO_STATS from receiver"""

@@ -36,7 +36,7 @@ class TCPFileTransfer:
         self.cwnd_history = []
         self.rtt_history = []
     
-    def send_file(self, filepath, progress_callback=None):
+    def send_file(self, filepath, target="Everyone", progress_callback=None):
         """
         Send a file with congestion control
         progress_callback(bytes_sent, total_bytes, cwnd)
@@ -47,6 +47,7 @@ class TCPFileTransfer:
         self.in_progress = True
         self.filename = os.path.basename(filepath)
         self.filesize = os.path.getsize(filepath)
+        self.target = target  # Store target
         self.bytes_sent = 0
         self.chunks_sent = 0
         self.chunks_acked = 0
@@ -63,7 +64,8 @@ class TCPFileTransfer:
                 MSG_FILE_START,
                 filename=self.filename,
                 filesize=self.filesize,
-                chunk_size=chunk_size
+                chunk_size=chunk_size,
+                target_name=self.target
             )
             
             # Read and send file in chunks
@@ -95,7 +97,8 @@ class TCPFileTransfer:
             # Send FILE_END
             self.tcp_control.send_message(
                 MSG_FILE_END,
-                checksum=checksum
+                checksum=checksum,
+                target_name=self.target
             )
             
             print(f"[FileTransfer] File '{self.filename}' sent successfully")
@@ -120,7 +123,8 @@ class TCPFileTransfer:
         self.tcp_control.send_message(
             MSG_FILE_CHUNK,
             chunk_id=chunk_id,
-            data=data_b64
+            data=data_b64,
+            target_name=self.target
         )
         
         self.chunks_sent += 1

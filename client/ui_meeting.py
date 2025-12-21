@@ -7,7 +7,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QTextEdit, QLineEdit, QListWidget, 
-                             QSplitter, QFileDialog, QScrollArea, QGridLayout)
+                             QSplitter, QFileDialog, QScrollArea, QGridLayout,
+                             QTabWidget, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QImage, QPixmap
 import cv2
@@ -59,7 +60,7 @@ class MeetingScreen(QWidget):
     
     # Signals
     send_chat_signal = pyqtSignal(str)  # message
-    send_file_signal = pyqtSignal(str)  # filepath
+    send_file_signal = pyqtSignal(str, str)  # filepath, target
     toggle_mic_signal = pyqtSignal(bool)  # enabled
     toggle_camera_signal = pyqtSignal(bool)  # enabled
     leave_meeting_signal = pyqtSignal()
@@ -70,12 +71,22 @@ class MeetingScreen(QWidget):
         self.video_widgets = {}  # {participant_id: VideoWidget}
         self.mic_enabled = True
         self.camera_enabled = True
+        self.client_name = ""
+        self.meeting_code = ""
+        
         self.setup_ui()
         
         # Update timer for video frames
         self.timer = QTimer()
         self.timer.timeout.connect(self.request_frame_update)
         self.timer.start(33)  # ~30 FPS
+        
+    def set_meeting_info(self, meeting_code, client_name):
+        """Set meeting info"""
+        self.meeting_code = meeting_code
+        self.client_name = client_name
+        if hasattr(self, 'top_label'):
+            self.top_label.setText(f"Meeting: {meeting_code}")
     
     def setup_ui(self):
         """Setup the meeting screen UI"""
@@ -87,6 +98,36 @@ class MeetingScreen(QWidget):
         # Left side: Video grid
         left_widget = QWidget()
         left_layout = QVBoxLayout()
+        
+        # Header with Info Button
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(10, 10, 10, 0)
+        
+        self.top_label = QLabel("Meeting in Progress")
+        self.top_label.setFont(QFont('Arial', 14, QFont.Bold))
+        
+        info_btn = QPushButton("ℹ️")
+        info_btn.setFixedSize(30, 30)
+        info_btn.setToolTip("Meeting Information")
+        info_btn.clicked.connect(self.show_meeting_info)
+        info_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 2px solid white;
+                border-radius: 15px;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.2);
+            }
+        """)
+        
+        # Add to header
+        header_layout.addWidget(self.top_label)
+        header_layout.addWidget(info_btn)
+        header_layout.addStretch()
+        left_layout.addLayout(header_layout)
         
         # Video grid container
         self.video_scroll = QScrollArea()
@@ -149,19 +190,28 @@ class MeetingScreen(QWidget):
         right_widget.setMaximumWidth(400)
         right_layout = QVBoxLayout()
         
-        # Tabs-like header
-        tabs_layout = QHBoxLayout()
-        chat_tab = QLabel("💬 Chat")
-        chat_tab.setFont(QFont('Arial', 14, QFont.Bold))
-        tabs_layout.addWidget(chat_tab)
-        tabs_layout.addStretch()
-        right_layout.addLayout(tabs_layout)
+        # Tab Widget for Chat and Participants
+        self.tabs = QTabWidget()
+        
+        # --- Chat Tab ---
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout()
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Target selector
+        target_layout = QHBoxLayout()
+        target_label = QLabel("To:")
+        self.chat_target_combo = QComboBox()
+        self.chat_target_combo.addItem("Everyone")
+        target_layout.addWidget(target_label)
+        target_layout.addWidget(self.chat_target_combo)
+        chat_layout.addLayout(target_layout)
         
         # Chat display
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
         self.chat_display.setFont(QFont('Arial', 11))
-        right_layout.addWidget(self.chat_display)
+        chat_layout.addWidget(self.chat_display)
         
         # Chat input
         chat_input_layout = QHBoxLayout()
@@ -183,7 +233,24 @@ class MeetingScreen(QWidget):
         
         chat_input_layout.addWidget(self.chat_input)
         chat_input_layout.addWidget(self.send_btn)
-        right_layout.addLayout(chat_input_layout)
+        chat_layout.addLayout(chat_input_layout)
+        chat_widget.setLayout(chat_layout)
+        
+        # --- Participants Tab ---
+        participants_widget = QWidget()
+        participants_layout = QVBoxLayout()
+        participants_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.participants_list = QListWidget()
+        self.participants_list.setFont(QFont('Arial', 12))
+        participants_layout.addWidget(self.participants_list)
+        participants_widget.setLayout(participants_layout)
+        
+        # Add tabs
+        self.tabs.addTab(chat_widget, "💬 Chat")
+        self.tabs.addTab(participants_widget, "👥 Participants")
+        
+        right_layout.addWidget(self.tabs)
         
         # File sharing
         file_layout = QHBoxLayout()
@@ -296,23 +363,46 @@ class MeetingScreen(QWidget):
         """Request frame updates (override in main app)"""
         pass
     
-    def add_chat_message(self, sender, message):
+    def add_chat_message(self, sender, message, is_private=False):
         """Add a message to chat"""
-        self.chat_display.append(f"<b>{sender}:</b> {message}")
+        if is_private:
+             self.chat_display.append(f"<span style='color:red; font-style:italic'>(Privately) <b>{sender}:</b> {message}</span>")
+        else:
+            self.chat_display.append(f"<b>{sender}:</b> {message}")
     
     def on_send_chat(self):
         """Send chat message"""
         message = self.chat_input.text().strip()
+        target = self.chat_target_combo.currentText()
         if message:
-            self.send_chat_signal.emit(message)
+            # Emit message AND target
+            self.send_chat_signal.emit(message + "|||" + target) # Hacky split for now or change signal
             self.chat_input.clear()
+
+    def update_chat_participants(self, participants):
+        """Update the combo box with list of participants"""
+        current = self.chat_target_combo.currentText()
+        self.chat_target_combo.clear()
+        self.chat_target_combo.addItem("Everyone")
+        for p in participants:
+            self.chat_target_combo.addItem(p)
+        
+        # Restore selection if still exists
+        index = self.chat_target_combo.findText(current)
+        if index >= 0:
+            self.chat_target_combo.setCurrentIndex(index)
     
     def on_send_file(self):
         """Open file dialog and send file"""
         filepath, _ = QFileDialog.getOpenFileName(self, "Select File to Send")
         if filepath:
-            self.send_file_signal.emit(filepath)
-            self.add_chat_message("System", f"Sending file: {os.path.basename(filepath)}")
+            target = self.chat_target_combo.currentText()
+            self.send_file_signal.emit(filepath, target)
+            
+            if target == "Everyone":
+                self.add_chat_message("System", f"Sending file: {os.path.basename(filepath)}")
+            else:
+                self.add_chat_message("System", f"Sending file to {target}: {os.path.basename(filepath)}", is_private=True)
     
     def on_toggle_mic(self):
         """Toggle microphone"""
@@ -351,3 +441,53 @@ class MeetingScreen(QWidget):
             self.camera_btn.setText("📹 Camera")
         else:
             self.camera_btn.setText("📹 Camera (Off)")
+
+    def add_participant_to_list(self, name, is_host=False):
+        """Add participant to the list"""
+        display_name = f"{name} (Host)" if is_host else name
+        
+        # Check if already exists to avoid duplicates
+        items = self.participants_list.findItems(display_name, Qt.MatchExactly)
+        if not items:
+            self.participants_list.addItem(display_name)
+            self._update_chat_combo()
+    
+    def remove_participant_from_list(self, name):
+        """Remove participant from the list"""
+        # Try both with and without host label
+        for item in self.participants_list.findItems(name, Qt.MatchStartsWith):
+            # Check exact match or match with host label
+            if item.text() == name or item.text() == f"{name} (Host)":
+                row = self.participants_list.row(item)
+                self.participants_list.takeItem(row)
+                self._update_chat_combo()
+                break
+
+    def _update_chat_combo(self):
+        """Update the combo box from participant list"""
+        current = self.chat_target_combo.currentText()
+        self.chat_target_combo.clear()
+        self.chat_target_combo.addItem("Everyone")
+        
+        for i in range(self.participants_list.count()):
+            item_text = self.participants_list.item(i).text()
+            # Strip (Host) if present
+            clean_name = item_text.replace(" (Host)", "")
+            
+            # Don't add self to target list
+            if clean_name != self.client_name:
+                self.chat_target_combo.addItem(clean_name)
+        
+        # Restore selection if still exists
+        index = self.chat_target_combo.findText(current)
+        if index >= 0:
+            self.chat_target_combo.setCurrentIndex(index)
+            
+    def show_meeting_info(self):
+        """Show meeting info dialog"""
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self, 
+            "Meeting Information", 
+            f"Meeting Details\n\nCode: {self.meeting_code}\nUser: {self.client_name}"
+        )

@@ -256,9 +256,9 @@ class ClientSession:
         self.tcp_control.send_message(MSG_DENY_JOIN, client_name=participant_name)
         return True
     
-    def send_chat(self, message):
+    def send_chat(self, message, target_name="Everyone"):
         """Send a chat message"""
-        self.tcp_control.send_message(MSG_CHAT, message=message)
+        self.tcp_control.send_message(MSG_CHAT, message=message, target_name=target_name)
     
     def register_udp_ports(self, video_port, audio_port):
         """Register UDP receiving ports with server"""

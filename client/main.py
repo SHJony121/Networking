@@ -27,7 +27,13 @@ class ClientApplication(QStackedWidget):
     
     # Signal for thread-safe join request handling
     join_request_signal = pyqtSignal(str)  # client_name
-    participant_joined_signal = pyqtSignal(str)  # participant_name
+    participant_joined_signal = pyqtSignal(str, bool)  # participant_name, is_host
+    
+    # File transfer signals
+    file_start_signal = pyqtSignal(str, int)  # filename, filesize
+    file_chunk_signal = pyqtSignal(int, str)  # chunk_id, data_b64
+    file_end_signal = pyqtSignal(str)  # checksum
+    chat_signal = pyqtSignal(str, str, bool)  # sender, message, is_private
     
     def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001):
         super().__init__()
@@ -53,6 +59,7 @@ class ClientApplication(QStackedWidget):
         # Connect signals to main-thread handlers
         self.join_request_signal.connect(self._handle_join_request_ui)
         self.participant_joined_signal.connect(self._handle_participant_joined_ui)
+        self.chat_signal.connect(self._handle_chat_ui)
         self.file_transfer = None
         self.file_receiver = None
         
@@ -67,6 +74,9 @@ class ClientApplication(QStackedWidget):
         
         # Connect internal signals
         self.join_request_signal.connect(self._handle_join_request_ui)
+        self.file_start_signal.connect(self._handle_file_start_ui)
+        self.file_chunk_signal.connect(self._handle_file_chunk_ui)
+        self.file_end_signal.connect(self._handle_file_end_ui)
         
     def setup_ui(self):
         """Setup UI and connect signals"""
@@ -108,15 +118,35 @@ class ClientApplication(QStackedWidget):
             QMessageBox.critical(self, "Error", "Failed to create meeting")
             return
         
-        # Show waiting room
-        self.waiting_room = WaitingRoomScreen(meeting_code)
-        self.waiting_room.allow_participant_signal.connect(self.on_allow_participant)
-        self.waiting_room.deny_participant_signal.connect(self.on_deny_participant)
-        self.waiting_room.start_meeting_signal.connect(self.on_enter_meeting)
+    def on_start_meeting(self, name, camera_enabled, mic_enabled):
+        """Handle start meeting"""
+        self.client_name = name
+        self.is_host = True
+        self.camera_enabled = camera_enabled
+        self.mic_enabled = mic_enabled
         
-        self.addWidget(self.waiting_room)
-        self.setCurrentWidget(self.waiting_room)
-        self.resize(600, 500)
+        # Connect to server
+        self.session = ClientSession(self.server_host, self.server_tcp_port)
+        if not self.session.connect():
+            QMessageBox.critical(self, "Error", "Failed to connect to server")
+            return
+        
+        # Register handlers FIRST
+        self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
+        self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
+        self.session.tcp_control.register_handler(MSG_NEW_JOIN_REQUEST, self.on_new_join_request)
+        
+        # Create meeting
+        meeting_code = self.session.create_meeting(name)
+        if not meeting_code:
+            QMessageBox.critical(self, "Error", "Failed to create meeting")
+            return
+        
+        # DIRECT ENTRY: Host enters meeting immediately (Google Meet/Zoom style)
+        # Store meeting code for reference
+        self.meeting_code = meeting_code
+        self.on_enter_meeting()
     
     def on_join_meeting(self, meeting_code, name, camera_enabled, mic_enabled):
         """Handle join meeting"""
@@ -137,10 +167,12 @@ class ClientApplication(QStackedWidget):
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
         
         # Now join meeting
+        # Now join meeting
         QMessageBox.information(self, "Joining", "Requesting to join meeting...")
         
         if self.session.join_meeting(meeting_code, name):
             QMessageBox.information(self, "Success", "Joined meeting!")
+            self.meeting_code = meeting_code # Store for info button
             self.on_enter_meeting()
         else:
             QMessageBox.critical(self, "Error", "Failed to join meeting")
@@ -205,15 +237,22 @@ class ClientApplication(QStackedWidget):
         self.meeting_screen.timer.timeout.disconnect()  # Disconnect old connection
         self.meeting_screen.timer.timeout.connect(self.update_video_frames)  # Connect to our method
         
-        # Add own video box
-        self.meeting_screen.add_video_stream('self', self.client_name)
         
-        # Add any buffered participants that joined before meeting screen was ready
+        # Add self video and update info
+        self.meeting_screen.set_meeting_info(getattr(self, 'meeting_code', 'Unknown'), self.client_name)
+        self.meeting_screen.add_video_stream('self', self.client_name)
+        self.meeting_screen.add_participant_to_list(self.client_name, self.is_host)
+        
+        # Add any buffered participants
         if hasattr(self, 'pending_participants'):
             print(f"[Client] Adding {len(self.pending_participants)} buffered participants")
-            for participant_name in self.pending_participants:
-                self.meeting_screen.add_video_stream(participant_name, participant_name)
+            for p in self.pending_participants:
+                name = p['name']
+                is_host = p.get('is_host', False)
+                self.meeting_screen.add_video_stream(name, name)
+                self.meeting_screen.add_participant_to_list(name, is_host)
             self.pending_participants = []
+            
         self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
@@ -270,6 +309,11 @@ class ClientApplication(QStackedWidget):
         self.file_transfer = TCPFileTransfer(self.session.tcp_control)
         self.file_receiver = FileReceiver()
         
+        # Register file handlers
+        self.session.tcp_control.register_handler(MSG_FILE_START_NOTIFY, self.on_file_start)
+        self.session.tcp_control.register_handler(MSG_FILE_CHUNK_FORWARD, self.on_file_chunk)
+        self.session.tcp_control.register_handler(MSG_FILE_END_NOTIFY, self.on_file_end)
+        
         # Register UDP ports with server
         try:
             print(f"[Client] About to register UDP ports: video={self.video_receiver.local_udp_port}, audio={self.audio_receiver.local_udp_port}")
@@ -318,28 +362,47 @@ class ClientApplication(QStackedWidget):
                     if idx < len(frame_list):
                         self.meeting_screen.update_video_frame(participant_id, frame_list[idx])
     
-    def on_send_chat(self, message):
+    def on_send_chat(self, message_data):
         """Send chat message"""
+        if "|||" in message_data:
+            message, target = message_data.split("|||", 1)
+        else:
+            message = message_data
+            target = "Everyone"
+            
         if self.session:
-            self.session.send_chat(message)
+            self.session.send_chat(message, target)
             # Add to own chat (only if not host, host sees broadcast)
-            if not self.is_host:
-                self.meeting_screen.add_chat_message(self.client_name, message)
+            # Actually, both see broadcast for public, but for private sender needs to see it locally
+            if target != "Everyone":
+                self.meeting_screen.add_chat_message(self.client_name, f"(to {target}) {message}", is_private=True)
     
     def on_chat_received(self, msg):
         """Handle received chat message"""
         sender_name = msg.get('sender_name')
         message = msg.get('message')
-        if self.meeting_screen and sender_name != self.client_name:
-            self.meeting_screen.add_chat_message(sender_name, message)
+        is_private = msg.get('is_private', False)
+        
+        # Prevent duplicate private messages (we added it locally with "to Target")
+        if is_private and sender_name == self.client_name:
+            return
+            
+        if self.meeting_screen: 
+             # For private messages, we might be target OR sender (reflected back)
+            self.chat_signal.emit(sender_name, message, is_private)
+
+    def _handle_chat_ui(self, sender, message, is_private):
+        """Handle chat in main thread"""
+        if self.meeting_screen:
+            self.meeting_screen.add_chat_message(sender, message, is_private)
     
-    def on_send_file(self, filepath):
+    def on_send_file(self, filepath, target="Everyone"):
         """Send file"""
         if self.file_transfer:
             import threading
             thread = threading.Thread(
                 target=self.file_transfer.send_file,
-                args=(filepath,),
+                args=(filepath, target),
                 daemon=True
             )
             thread.start()
@@ -369,7 +432,8 @@ class ClientApplication(QStackedWidget):
     def on_participant_joined(self, msg):
         """Handle participant joined (called from TCP thread)"""
         participant_name = msg.get('participant_name')
-        print(f"[Client] PARTICIPANT_JOINED received: {participant_name}, my name: {self.client_name}")
+        is_host = msg.get('is_host', False)
+        print(f"[Client] PARTICIPANT_JOINED received: {participant_name}, host={is_host}")
         
         # Don't add yourself again
         if participant_name == self.client_name:
@@ -377,28 +441,34 @@ class ClientApplication(QStackedWidget):
             return
         
         # Emit signal to handle in main Qt thread
-        self.participant_joined_signal.emit(participant_name)
+        self.participant_joined_signal.emit(participant_name, is_host)
     
-    def _handle_participant_joined_ui(self, participant_name):
+    def _handle_participant_joined_ui(self, participant_name, is_host):
         """Handle participant joined in main Qt thread"""
         if self.meeting_screen:
             print(f"[Client] Adding video box for {participant_name}")
-            print(f"[Client] Current video_widgets BEFORE add: {list(self.meeting_screen.video_widgets.keys())}")
             self.meeting_screen.add_video_stream(participant_name, participant_name)
-            print(f"[Client] Current video_widgets AFTER add: {list(self.meeting_screen.video_widgets.keys())}")
+            self.meeting_screen.add_video_stream(participant_name, participant_name)
+            
+            # Add to list (UI automatically updates combo box now)
+            self.meeting_screen.add_participant_to_list(participant_name, is_host)
+            
             self.meeting_screen.add_chat_message("System", f"{participant_name} joined")
         else:
             # Buffer participants that joined before meeting screen was created
             print(f"[Client] Buffering participant {participant_name} (meeting screen not ready yet)")
             if not hasattr(self, 'pending_participants'):
                 self.pending_participants = []
-            self.pending_participants.append(participant_name)
+            self.pending_participants.append({'name': participant_name, 'is_host': is_host})
     
     def on_participant_left(self, msg):
         """Handle participant left"""
         participant_name = msg.get('participant_name')
         if self.meeting_screen:
             self.meeting_screen.remove_video_stream(participant_name)
+        if self.meeting_screen:
+            self.meeting_screen.remove_video_stream(participant_name)
+            self.meeting_screen.remove_participant_from_list(participant_name)
             self.meeting_screen.add_chat_message("System", f"{participant_name} left")
     
     def on_leave_meeting(self):
@@ -431,6 +501,46 @@ class ClientApplication(QStackedWidget):
         self.resize(600, 400)
         
         QMessageBox.information(self, "Left", "You have left the meeting")
+
+    # File Transfer Handlers (called from TCP thread)
+    def on_file_start(self, msg):
+        """Handle file start message"""
+        filename = msg.get('filename')
+        filesize = msg.get('filesize')
+        # Emit signal to handle in main thread (for thread safety if needed, 
+        # though FileReceiver writes to disk, UI updates might be needed later)
+        self.file_start_signal.emit(filename, filesize)
+
+    def on_file_chunk(self, msg):
+        """Handle file chunk message"""
+        chunk_id = msg.get('chunk_id')
+        data = msg.get('data')
+        self.file_chunk_signal.emit(chunk_id, data)
+
+    def on_file_end(self, msg):
+        """Handle file end message"""
+        checksum = msg.get('checksum')
+        self.file_end_signal.emit(checksum)
+
+    # UI/Main Thread File Handlers
+    def _handle_file_start_ui(self, filename, filesize):
+        """Handle file start in main thread"""
+        if self.file_receiver:
+            self.file_receiver.start_receiving(filename, filesize)
+            if self.meeting_screen:
+                self.meeting_screen.add_chat_message("System", f"Receiving file: {filename} ({filesize} bytes)...")
+
+    def _handle_file_chunk_ui(self, chunk_id, data_b64):
+        """Handle file chunk in main thread"""
+        if self.file_receiver:
+            self.file_receiver.receive_chunk(chunk_id, data_b64)
+
+    def _handle_file_end_ui(self, checksum):
+        """Handle file end in main thread"""
+        if self.file_receiver:
+            self.file_receiver.finish_receiving(checksum)
+            if self.meeting_screen:
+                self.meeting_screen.add_chat_message("System", "File received successfully!")
 
 def main():
     """Main entry point"""
