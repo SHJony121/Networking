@@ -359,6 +359,16 @@ class MeetingScreen(QWidget):
             widget.clear()
             widget.setText(f"{widget.participant_name}\n(No Video)")
     
+    def show_no_video(self, participant_id, participant_name=None):
+        """Show 'No Video' placeholder for a participant when camera is off"""
+        if participant_id in self.video_widgets:
+            widget = self.video_widgets[participant_id]
+            name = participant_name or widget.participant_name
+            widget.clear()  # Clear any existing pixmap
+            widget.setText(f"{name}\n(No Video)")
+            widget.setStyleSheet("color: white; font-size: 14px; background-color: #333; border: 2px solid #333;")
+            print(f"[MeetingScreen] Showing 'No Video' for {participant_id}")
+    
     def request_frame_update(self):
         """Request frame updates (override in main app)"""
         pass
@@ -416,13 +426,19 @@ class MeetingScreen(QWidget):
     
     def on_toggle_camera(self):
         """Toggle camera"""
+        print(f"[MeetingScreen] ===== Camera button clicked! =====")
         self.camera_enabled = self.camera_btn.isChecked()
+        print(f"[MeetingScreen] camera_enabled = {self.camera_enabled}")
+        print(f"[MeetingScreen] Emitting toggle_camera_signal with: {self.camera_enabled}")
         self.toggle_camera_signal.emit(self.camera_enabled)
+        print(f"[MeetingScreen] Signal emitted successfully")
         
         if self.camera_enabled:
             self.camera_btn.setText("📹 Camera")
         else:
             self.camera_btn.setText("📹 Camera (Off)")
+        
+        print(f"[MeetingScreen] Button text updated, camera toggle complete")
     
     def set_mic_state(self, enabled):
         """Set initial mic state"""

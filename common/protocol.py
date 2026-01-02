@@ -22,6 +22,7 @@ MSG_AUDIO_STATS = "AUDIO_STATS"
 MSG_LEAVE = "LEAVE"
 MSG_HEARTBEAT = "HEARTBEAT"
 MSG_REGISTER_UDP = "REGISTER_UDP"
+MSG_CAMERA_STATUS = "CAMERA_STATUS"  # Notify camera on/off
 
 # Server -> Client
 MSG_MEETING_CREATED = "MEETING_CREATED"
@@ -37,6 +38,7 @@ MSG_PARTICIPANT_JOINED = "PARTICIPANT_JOINED"
 MSG_PARTICIPANT_LEFT = "PARTICIPANT_LEFT"
 MSG_NEW_JOIN_REQUEST = "NEW_JOIN_REQUEST"
 MSG_HEARTBEAT_ACK = "HEARTBEAT_ACK"
+MSG_CAMERA_STATUS_BROADCAST = "CAMERA_STATUS_BROADCAST"  # Broadcast camera status to all
 
 # ============================================================================
 # Video Packet Format (UDP)
@@ -121,13 +123,17 @@ def unpack_tcp_message(sock):
         return None
     
     length = struct.unpack('!I', length_data)[0]
+    print(f"[Protocol] unpack_tcp_message: length={length}")
     
     # Read JSON payload
     json_data = recv_exact(sock, length)
     if not json_data:
         return None
     
-    return json.loads(json_data.decode('utf-8'))
+    print(f"[Protocol] unpack_tcp_message: json_data={json_data[:100]}")
+    result = json.loads(json_data.decode('utf-8'))
+    print(f"[Protocol] unpack_tcp_message: msg_type={result.get('type')}")
+    return result
 
 def recv_exact(sock, n):
     """Receive exactly n bytes from socket"""

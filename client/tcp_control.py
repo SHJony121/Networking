@@ -72,19 +72,25 @@ class TCPControl:
     
     def send_message(self, msg_type, **kwargs):
         """Send a message to the server"""
+        print(f"[TCPControl] send_message called: type={msg_type}, socket={self.socket}, kwargs={kwargs}")
+        
         if not self.socket:
             raise Exception("Not connected to server")
         
         with self.send_lock:  # Thread-safe sending
+            print(f"[TCPControl] Acquired send_lock for {msg_type}")
             message = pack_tcp_message(msg_type, **kwargs)
-            if msg_type == MSG_REGISTER_UDP:
-                print(f"[TCPControl] Sending REGISTER_UDP message: {kwargs}")
-                print(f"[TCPControl] Message packed into {len(message)} bytes")
+            print(f"[TCPControl] Message packed: type={msg_type}, size={len(message)} bytes, content={message[:100]}")
             
             try:
-                self.socket.sendall(message)  # Use sendall to ensure all bytes are sent
-                if msg_type == MSG_REGISTER_UDP:
-                    print(f"[TCPControl] REGISTER_UDP: All {len(message)} bytes sent successfully")
+                sent_bytes = self.socket.send(message)
+                print(f"[TCPControl] socket.send() returned: {sent_bytes} bytes for {msg_type}")
+                if sent_bytes < len(message):
+                    print(f"[TCPControl] WARNING: Only sent {sent_bytes}/{len(message)} bytes!")
+                    remaining = message[sent_bytes:]
+                    self.socket.sendall(remaining)
+                    print(f"[TCPControl] Sent remaining {len(remaining)} bytes")
+                print(f"[TCPControl] {msg_type}: All {len(message)} bytes sent successfully")
             except Exception as e:
                 print(f"[TCPControl] ERROR sending {msg_type}: {e}")
                 import traceback

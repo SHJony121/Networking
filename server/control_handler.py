@@ -106,6 +106,11 @@ class ControlHandler:
         elif msg_type == MSG_REGISTER_UDP:
             self.handle_register_udp(client_socket, msg)
         
+        elif msg_type == MSG_CAMERA_STATUS:
+            print(f"[ControlHandler] ===== CAMERA_STATUS MESSAGE RECEIVED =====")
+            self.handle_camera_status(client_socket, msg)
+            print(f"[ControlHandler] ===== CAMERA_STATUS HANDLER COMPLETED =====")
+        
         else:
             print(f"[ControlHandler] Unknown message type: {msg_type}")
     
@@ -355,8 +360,9 @@ class ControlHandler:
         self.meeting_manager.leave_meeting(client_socket)
     
     def handle_heartbeat(self, client_socket, msg):
-        """Handle HEARTBEAT message"""
-        response = pack_tcp_message(MSG_HEARTBEAT_ACK)
+        """Handle HEARTBEAT message - echo back timestamp for RTT calculation"""
+        timestamp = msg.get('timestamp', 0)
+        response = pack_tcp_message(MSG_HEARTBEAT_ACK, timestamp=timestamp)
         try:
             client_socket.sendall(response)
         except:
@@ -380,6 +386,30 @@ class ControlHandler:
             print(f"[ControlHandler] Registered UDP for {client_info['name']}: {udp_addr}")
         else:
             print(f"[ControlHandler] No client info found for socket")
+    
+    def handle_camera_status(self, client_socket, msg):
+        """Handle CAMERA_STATUS - broadcast camera on/off status to other participants"""
+        enabled = msg.get('enabled', True)
+        
+        client_info = self.meeting_manager.get_client_info(client_socket)
+        if client_info:
+            client_name = client_info.get('name', 'Unknown')
+            meeting_code = client_info.get('meeting_code')
+            
+            print(f"[ControlHandler] Camera status from {client_name}: {'ON' if enabled else 'OFF'}")
+            
+            # Broadcast to all other participants in the meeting
+            if meeting_code:
+                self.broadcast_to_meeting(
+                    meeting_code,
+                    MSG_CAMERA_STATUS_BROADCAST,
+                    exclude_socket=client_socket,
+                    participant_name=client_name,
+                    enabled=enabled
+                )
+                print(f"[ControlHandler] Camera status broadcast to meeting {meeting_code}")
+        else:
+            print(f"[ControlHandler] Camera status received but no client info found")
     
     def broadcast_to_meeting(self, meeting_code, msg_type, exclude_socket=None, **kwargs):
         """Broadcast a message to all participants in a meeting"""

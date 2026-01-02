@@ -34,6 +34,7 @@ class ClientApplication(QStackedWidget):
     file_chunk_signal = pyqtSignal(int, str)  # chunk_id, data_b64
     file_end_signal = pyqtSignal(str)  # checksum
     chat_signal = pyqtSignal(str, str, bool)  # sender, message, is_private
+    camera_status_signal = pyqtSignal(str, bool)  # participant_name, camera_enabled
     
     def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001):
         super().__init__()
@@ -49,6 +50,10 @@ class ClientApplication(QStackedWidget):
         self.camera_enabled = True
         self.mic_enabled = True
         
+        # Track camera status of other participants
+        # {participant_name: True/False} - True means camera is ON
+        self.participant_camera_status = {}
+        
         # Streaming components
         self.video_sender = None
         self.video_receiver = None
@@ -60,6 +65,7 @@ class ClientApplication(QStackedWidget):
         self.join_request_signal.connect(self._handle_join_request_ui)
         self.participant_joined_signal.connect(self._handle_participant_joined_ui)
         self.chat_signal.connect(self._handle_chat_ui)
+        self.camera_status_signal.connect(self._handle_camera_status_ui)
         self.file_transfer = None
         self.file_receiver = None
         
@@ -243,6 +249,10 @@ class ClientApplication(QStackedWidget):
         self.meeting_screen.add_video_stream('self', self.client_name)
         self.meeting_screen.add_participant_to_list(self.client_name, self.is_host)
         
+        # Initialize own camera status (for self)
+        self.participant_camera_status['self'] = self.camera_enabled
+        print(f"[Client] Initialized own camera status: {self.camera_enabled}")
+        
         # Add any buffered participants
         if hasattr(self, 'pending_participants'):
             print(f"[Client] Adding {len(self.pending_participants)} buffered participants")
@@ -251,11 +261,15 @@ class ClientApplication(QStackedWidget):
                 is_host = p.get('is_host', False)
                 self.meeting_screen.add_video_stream(name, name)
                 self.meeting_screen.add_participant_to_list(name, is_host)
+                # Initialize camera status for buffered participant
+                self.participant_camera_status[name] = True
+                print(f"[Client] Initialized buffered participant {name} camera status: ON")
             self.pending_participants = []
             
         self.session.tcp_control.register_handler(MSG_CHAT_BROADCAST, self.on_chat_received)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_JOINED, self.on_participant_joined)
         self.session.tcp_control.register_handler(MSG_PARTICIPANT_LEFT, self.on_participant_left)
+        self.session.tcp_control.register_handler(MSG_CAMERA_STATUS_BROADCAST, self.on_camera_status_received)
         
         self.addWidget(self.meeting_screen)
         self.setCurrentWidget(self.meeting_screen)
@@ -330,6 +344,17 @@ class ClientApplication(QStackedWidget):
             import traceback
             traceback.print_exc()
         
+        # Send initial camera status to everyone
+        try:
+            if self.session and self.session.tcp_control:
+                self.session.tcp_control.send_message(
+                    MSG_CAMERA_STATUS,
+                    enabled=self.camera_enabled
+                )
+                print(f"[Client] Initial camera status sent: {'ON' if self.camera_enabled else 'OFF'}")
+        except Exception as e:
+            print(f"[Client] Failed to send initial camera status: {e}")
+        
         print("[Client] Streaming initialized")
     
     def update_video_frames(self):
@@ -347,18 +372,31 @@ class ClientApplication(QStackedWidget):
         if self.video_receiver:
             sender_frames = self.video_receiver.get_all_sender_frames()
             
-            # Get list of other participants (not self)
-            other_participants = [pid for pid in self.meeting_screen.video_widgets.keys() if pid != 'self']
+            # Get list of other participants (not self) who have camera ON
+            all_other_participants = [pid for pid in self.meeting_screen.video_widgets.keys() if pid != 'self']
+            participants_with_camera_on = [
+                pid for pid in all_other_participants
+                if self.participant_camera_status.get(pid, True)  # Default to True (camera ON)
+            ]
             
-            # Assign received frames to participant boxes
+            # Debug logging (only every 60 frames to avoid spam)
+            if not hasattr(self, '_frame_update_count'):
+                self._frame_update_count = 0
+            self._frame_update_count += 1
+            if self._frame_update_count % 60 == 0:
+                print(f"[Client] update_video_frames: all_participants={all_other_participants}, "
+                      f"camera_on={participants_with_camera_on}, "
+                      f"camera_status={self.participant_camera_status}")
+            
+            # Assign received frames to participant boxes with camera ON
             frame_list = list(sender_frames.values())
             
-            # Only update if we have frames AND participants
-            if frame_list and other_participants:
+            # Only update if we have frames AND participants with camera ON
+            if frame_list and participants_with_camera_on:
                 # For now, just show the latest received frame in the first participant box
                 # (This is a limitation - we can't distinguish which frame belongs to which participant
                 # without proper UDP address mapping, which requires REGISTER_UDP to work properly)
-                for idx, participant_id in enumerate(other_participants):
+                for idx, participant_id in enumerate(participants_with_camera_on):
                     if idx < len(frame_list):
                         self.meeting_screen.update_video_frame(participant_id, frame_list[idx])
     
@@ -415,13 +453,38 @@ class ClientApplication(QStackedWidget):
     
     def on_toggle_camera(self, enabled):
         """Toggle camera"""
+        print(f"[Client] ===== on_toggle_camera called: enabled={enabled} =====")
         self.camera_enabled = enabled
         if self.video_sender:
             self.video_sender.set_enabled(enabled)
+            print(f"[Client] Video sender enabled set to: {enabled}")
+        
+        # Notify server about camera status change
+        if self.session and self.session.tcp_control:
+            try:
+                print(f"[Client] About to send camera status message...")
+                self.session.tcp_control.send_message(
+                    MSG_CAMERA_STATUS,
+                    enabled=enabled
+                )
+                print(f"[Client] Camera status sent: {'ON' if enabled else 'OFF'}")
+            except Exception as e:
+                print(f"[Client] Failed to send camera status: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[Client] WARNING: Cannot send camera status - session={self.session}, tcp_control={self.session.tcp_control if self.session else 'N/A'}")
+        
+        # Update own video widget to show "(No Video)" when camera is off
+        if not enabled and self.meeting_screen:
+            print(f"[Client] Showing '(No Video)' for self")
+            self.meeting_screen.show_no_video('self', self.client_name)
         
         # Clear video display when camera is turned off
         if not enabled and self.meeting_screen:
             self.meeting_screen.clear_video_frame('self')
+        
+        print(f"[Client] ===== on_toggle_camera completed =====")
     
     def on_show_stats(self):
         """Show statistics window"""
@@ -450,6 +513,10 @@ class ClientApplication(QStackedWidget):
             self.meeting_screen.add_video_stream(participant_name, participant_name)
             self.meeting_screen.add_video_stream(participant_name, participant_name)
             
+            # Initialize camera status to ON for new participant
+            self.participant_camera_status[participant_name] = True
+            print(f"[Client] Initialized camera status for {participant_name}: ON")
+            
             # Add to list (UI automatically updates combo box now)
             self.meeting_screen.add_participant_to_list(participant_name, is_host)
             
@@ -471,6 +538,37 @@ class ClientApplication(QStackedWidget):
             self.meeting_screen.remove_participant_from_list(participant_name)
             self.meeting_screen.add_chat_message("System", f"{participant_name} left")
     
+    def on_camera_status_received(self, msg):
+        """Handle camera status broadcast from another participant"""
+        participant_name = msg.get('participant_name')
+        enabled = msg.get('enabled', True)
+        
+        # Skip if it's our own status
+        if participant_name == self.client_name:
+            return
+        
+        print(f"[Client] Camera status received: {participant_name} camera {'ON' if enabled else 'OFF'}")
+        
+        # Emit signal to handle in main thread
+        self.camera_status_signal.emit(participant_name, enabled)
+    
+    def _handle_camera_status_ui(self, participant_name, enabled):
+        """Handle camera status in main thread"""
+        # Track the camera status
+        self.participant_camera_status[participant_name] = enabled
+        print(f"[Client] Updated camera status: {participant_name} = {enabled}")
+        print(f"[Client] All camera statuses: {self.participant_camera_status}")
+        print(f"[Client] Video widgets keys: {list(self.meeting_screen.video_widgets.keys()) if self.meeting_screen else 'No meeting screen'}")
+        
+        if self.meeting_screen:
+            if enabled:
+                # Camera is ON - video frames will be received and displayed normally
+                print(f"[Client] {participant_name} turned camera ON")
+            else:
+                # Camera is OFF - show "(No Video)" placeholder
+                self.meeting_screen.show_no_video(participant_name, participant_name)
+                print(f"[Client] {participant_name} turned camera OFF, showing placeholder")
+
     def on_leave_meeting(self):
         """Leave meeting"""
         print("[Client] Leaving meeting...")

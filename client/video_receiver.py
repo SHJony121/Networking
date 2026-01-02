@@ -36,7 +36,10 @@ class VideoReceiver:
         self.frames_received = 0
         self.bytes_received = 0
         self.frames_lost = 0
-        self.last_sequence_num = -1
+        
+        # Per-sender sequence tracking to properly calculate packet loss
+        # {sender_addr: last_sequence_num}
+        self.sender_sequence = {}
         
         # Jitter calculation
         self.arrival_times = deque(maxlen=100)
@@ -106,14 +109,20 @@ class VideoReceiver:
             header = unpack_video_header(data)
             payload = data[VIDEO_HEADER_SIZE:]
             
-            # Check for lost frames
-            if self.last_sequence_num != -1:
-                expected_seq = (self.last_sequence_num + 1) % (2**32)
-                if header['sequence_num'] != expected_seq:
-                    lost = (header['sequence_num'] - expected_seq) % (2**32)
-                    self.frames_lost += lost
+            # Check for lost frames - track per sender to avoid false positives
+            # when receiving interleaved packets from multiple senders
+            sender_key = addr  # Use sender address as key
+            last_seq = self.sender_sequence.get(sender_key, -1)
             
-            self.last_sequence_num = header['sequence_num']
+            if last_seq != -1:
+                expected_seq = (last_seq + 1) % (2**32)
+                if header['sequence_num'] != expected_seq:
+                    # Only count as loss if sequence jumped forward (not backward/duplicate)
+                    seq_diff = (header['sequence_num'] - expected_seq) % (2**32)
+                    if seq_diff < 1000:  # Reasonable gap (not wraparound)
+                        self.frames_lost += seq_diff
+            
+            self.sender_sequence[sender_key] = header['sequence_num']
             
             # Record arrival time for jitter calculation
             arrival_time = time.time()

@@ -91,11 +91,18 @@ class StatsWindow(QDialog):
             # Get current stats
             current = self.stats_collector.get_current_stats()
             
+            # Debug: Print stats to verify they're being collected
+            print(f"[StatsWindow] Updating graphs - RTT: {current['rtt_ms']:.1f}ms, "
+                  f"Loss: {current['packet_loss_percent']:.2f}%, "
+                  f"Jitter: {current['jitter_ms']:.2f}ms, "
+                  f"FPS: {current['fps_sent']:.1f}, "
+                  f"Bitrate: {current['bitrate_kbps']:.0f}kbps")
+            
             # Update labels
             self.rtt_label.setText(f"RTT: {current['rtt_ms']:.1f} ms")
-            self.loss_label.setText(f"Loss: {current['packet_loss_percent']:.1f} %")
-            self.jitter_label.setText(f"Jitter: {current['jitter_ms']:.1f} ms")
-            self.fps_label.setText(f"FPS: {current['fps_received']:.1f}")
+            self.loss_label.setText(f"Loss: {current['packet_loss_percent']:.2f} %")
+            self.jitter_label.setText(f"Jitter: {current['jitter_ms']:.2f} ms")
+            self.fps_label.setText(f"FPS: {current['fps_sent']:.1f}")
             self.bitrate_label.setText(f"Bitrate: {current['bitrate_kbps']:.0f} kbps")
             
             # Get history
@@ -110,39 +117,62 @@ class StatsWindow(QDialog):
             self.ax_cwnd.clear()
             
             # Plot RTT
-            if history['rtt']:
+            if history['rtt'] and len(history['rtt']) > 0:
                 x = list(range(len(history['rtt'])))
                 self.ax_rtt.plot(x, history['rtt'], 'b-', linewidth=2)
                 self.ax_rtt.set_title(f"RTT (ms) - Current: {current['rtt_ms']:.1f}")
-                self.ax_rtt.set_ylim(0, max(history['rtt']) * 1.2 if history['rtt'] else 100)
+                max_val = max(history['rtt'])
+                self.ax_rtt.set_ylim(0, max_val * 1.2 if max_val > 0 else 100)
+            else:
+                self.ax_rtt.text(0.5, 0.5, 'Collecting data...', 
+                                ha='center', va='center', transform=self.ax_rtt.transAxes)
+                self.ax_rtt.set_title('RTT (ms)')
             
             # Plot Packet Loss
-            if history['packet_loss']:
+            if history['packet_loss'] and len(history['packet_loss']) > 0:
                 x = list(range(len(history['packet_loss'])))
                 self.ax_loss.plot(x, history['packet_loss'], 'r-', linewidth=2)
-                self.ax_loss.set_title(f"Packet Loss (%) - Current: {current['packet_loss_percent']:.1f}")
+                self.ax_loss.set_title(f"Packet Loss (%) - Current: {current['packet_loss_percent']:.2f}")
                 self.ax_loss.set_ylim(0, 100)
+            else:
+                self.ax_loss.text(0.5, 0.5, 'Collecting data...', 
+                                 ha='center', va='center', transform=self.ax_loss.transAxes)
+                self.ax_loss.set_title('Packet Loss (%)')
             
             # Plot Jitter
-            if history['jitter']:
+            if history['jitter'] and len(history['jitter']) > 0:
                 x = list(range(len(history['jitter'])))
                 self.ax_jitter.plot(x, history['jitter'], 'g-', linewidth=2)
-                self.ax_jitter.set_title(f"Jitter (ms) - Current: {current['jitter_ms']:.1f}")
-                self.ax_jitter.set_ylim(0, max(history['jitter']) * 1.2 if history['jitter'] else 50)
+                self.ax_jitter.set_title(f"Jitter (ms) - Current: {current['jitter_ms']:.2f}")
+                max_val = max(history['jitter'])
+                self.ax_jitter.set_ylim(0, max_val * 1.2 if max_val > 0 else 50)
+            else:
+                self.ax_jitter.text(0.5, 0.5, 'Collecting data...', 
+                                   ha='center', va='center', transform=self.ax_jitter.transAxes)
+                self.ax_jitter.set_title('Jitter (ms)')
             
             # Plot FPS
-            if history['fps']:
+            if history['fps'] and len(history['fps']) > 0:
                 x = list(range(len(history['fps'])))
                 self.ax_fps.plot(x, history['fps'], 'm-', linewidth=2)
-                self.ax_fps.set_title(f"FPS - Current: {current['fps_received']:.1f}")
+                self.ax_fps.set_title(f"FPS - Current: {current['fps_sent']:.1f}")
                 self.ax_fps.set_ylim(0, 30)
+            else:
+                self.ax_fps.text(0.5, 0.5, 'Collecting data...', 
+                                ha='center', va='center', transform=self.ax_fps.transAxes)
+                self.ax_fps.set_title('FPS')
             
             # Plot Bitrate
-            if history['bitrate']:
+            if history['bitrate'] and len(history['bitrate']) > 0:
                 x = list(range(len(history['bitrate'])))
                 self.ax_bitrate.plot(x, history['bitrate'], 'c-', linewidth=2)
                 self.ax_bitrate.set_title(f"Bitrate (kbps) - Current: {current['bitrate_kbps']:.0f}")
-                self.ax_bitrate.set_ylim(0, max(history['bitrate']) * 1.2 if history['bitrate'] else 1000)
+                max_val = max(history['bitrate'])
+                self.ax_bitrate.set_ylim(0, max_val * 1.2 if max_val > 0 else 1000)
+            else:
+                self.ax_bitrate.text(0.5, 0.5, 'Collecting data...', 
+                                    ha='center', va='center', transform=self.ax_bitrate.transAxes)
+                self.ax_bitrate.set_title('Bitrate (kbps)')
             
             # Plot cwnd (if file transfer active)
             if self.file_transfer:

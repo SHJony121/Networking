@@ -35,6 +35,10 @@ class StatsCollector:
         self.current_fps_received = 0
         self.current_bitrate = 0
         
+        # RTT measurement
+        self.heartbeat_send_time = 0
+        self.last_heartbeat_time = 0
+        
         # Thread control
         self.running = False
         self.collection_thread = None
@@ -44,6 +48,10 @@ class StatsCollector:
         self.last_bytes_sent = 0
         self.last_bytes_received = 0
         self.last_bitrate_time = time.time()
+        
+        # Register handler for heartbeat ACK
+        if self.tcp_control:
+            self.tcp_control.register_handler(MSG_HEARTBEAT_ACK, self._on_heartbeat_ack)
     
     def start(self):
         """Start collecting stats"""
@@ -63,6 +71,7 @@ class StatsCollector:
         """Main stats collection loop"""
         while self.running:
             try:
+                self._send_heartbeat()
                 self._collect_stats()
                 self._apply_adaptive_logic()
                 self._send_stats_to_server()
@@ -80,24 +89,29 @@ class StatsCollector:
                 self.current_packet_loss = video_stats.get('packet_loss_percent', 0)
                 self.current_jitter = video_stats.get('jitter_ms', 0)
                 self.current_fps_received = video_stats.get('fps_received', 0)
+                
+                # Debug logging
+                print(f"[StatsCollector] Receiver stats - Loss: {self.current_packet_loss:.2f}%, "
+                      f"Jitter: {self.current_jitter:.2f}ms, FPS: {self.current_fps_received:.2f}")
             
             # Get video sender stats
             if self.video_sender:
                 sender_stats = self.video_sender.get_stats()
                 self.current_fps_sent = sender_stats.get('fps', 0)
+                print(f"[StatsCollector] Sender stats - FPS: {self.current_fps_sent:.2f}")
             
             # Calculate bitrate
             self._calculate_bitrate()
+            print(f"[StatsCollector] Bitrate: {self.current_bitrate:.2f} kbps")
             
-            # Estimate RTT (simplified - using jitter as proxy)
-            # In production, you'd ping-pong timestamps
-            self.current_rtt = self.current_jitter * 2  # Rough estimate
+            # RTT is now measured via heartbeat in _on_heartbeat_ack()
+            # No need to estimate from jitter
             
             # Add to history
             self.rtt_history.append(self.current_rtt)
             self.packet_loss_history.append(self.current_packet_loss)
             self.jitter_history.append(self.current_jitter)
-            self.fps_history.append(self.current_fps_received)
+            self.fps_history.append(self.current_fps_sent)
             self.bitrate_history.append(self.current_bitrate)
     
     def _calculate_bitrate(self):
@@ -190,3 +204,30 @@ class StatsCollector:
                 return 0
             recent = list(self.packet_loss_history)[-window:]
             return sum(recent) / len(recent)
+    
+    def _send_heartbeat(self):
+        """Send heartbeat to server for RTT measurement"""
+        if self.tcp_control and self.tcp_control.is_connected():
+            current_time = time.time()
+            # Send heartbeat every second
+            if current_time - self.last_heartbeat_time >= 1.0:
+                try:
+                    timestamp = time.time()
+                    self.heartbeat_send_time = timestamp
+                    self.tcp_control.send_message(MSG_HEARTBEAT, timestamp=timestamp)
+                    print(f"[StatsCollector] Heartbeat sent at {timestamp}")
+                    self.last_heartbeat_time = current_time
+                except Exception as e:
+                    print(f"[StatsCollector] Failed to send heartbeat: {e}")
+    
+    def _on_heartbeat_ack(self, msg):
+        """Handle heartbeat ACK from server"""
+        print(f"[StatsCollector] Heartbeat ACK received: {msg}")
+        sent_timestamp = msg.get('timestamp', 0)
+        if sent_timestamp > 0:
+            rtt_ms = (time.time() - sent_timestamp) * 1000
+            print(f"[StatsCollector] RTT calculated: {rtt_ms:.2f}ms")
+            with self.stats_lock:
+                self.current_rtt = rtt_ms
+        else:
+            print(f"[StatsCollector] WARNING: No timestamp in heartbeat ACK")
