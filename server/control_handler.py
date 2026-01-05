@@ -394,7 +394,7 @@ class ControlHandler:
         client_info = self.meeting_manager.get_client_info(client_socket)
         if client_info:
             client_name = client_info.get('name', 'Unknown')
-            meeting_code = client_info.get('meeting_code')
+            meeting_code = client_info.get('meeting')  # Fixed: changed 'meeting_code' to 'meeting'
             
             print(f"[ControlHandler] Camera status from {client_name}: {'ON' if enabled else 'OFF'}")
             

@@ -35,6 +35,7 @@ class ClientApplication(QStackedWidget):
     file_end_signal = pyqtSignal(str)  # checksum
     chat_signal = pyqtSignal(str, str, bool)  # sender, message, is_private
     camera_status_signal = pyqtSignal(str, bool)  # participant_name, camera_enabled
+    quality_changed_signal = pyqtSignal(str) # quality_text
     
     def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001):
         super().__init__()
@@ -66,6 +67,7 @@ class ClientApplication(QStackedWidget):
         self.participant_joined_signal.connect(self._handle_participant_joined_ui)
         self.chat_signal.connect(self._handle_chat_ui)
         self.camera_status_signal.connect(self._handle_camera_status_ui)
+        self.quality_changed_signal.connect(self._handle_quality_change_ui)
         self.file_transfer = None
         self.file_receiver = None
         
@@ -294,8 +296,12 @@ class ClientApplication(QStackedWidget):
             # Still need to create sender but don't open camera
             print("[Client] Camera disabled, not starting video capture")
         
+        # Connect quality callback
+        self.video_sender.quality_callback = self._on_sender_quality_changed
+        
         # Video receiver (use port 0 to let OS assign a free port)
         self.video_receiver = VideoReceiver(0)
+
         self.video_receiver.start()
         print(f"[Client] Video receiver listening on port {self.video_receiver.local_udp_port}")
         
@@ -317,6 +323,7 @@ class ClientApplication(QStackedWidget):
             self.audio_receiver,
             self.session.tcp_control
         )
+        self.stats_collector.stats_updated_signal.connect(self._handle_stats_update_ui)
         self.stats_collector.start()
         
         # File transfer
@@ -568,6 +575,21 @@ class ClientApplication(QStackedWidget):
                 # Camera is OFF - show "(No Video)" placeholder
                 self.meeting_screen.show_no_video(participant_name, participant_name)
                 print(f"[Client] {participant_name} turned camera OFF, showing placeholder")
+
+    def _handle_stats_update_ui(self, stats):
+        """Handle stats update in main thread"""
+        if self.meeting_screen:
+            rtt = stats.get('rtt_ms', 0)
+            self.meeting_screen.update_ping(rtt)
+
+    def _on_sender_quality_changed(self, quality_text):
+        """Handle quality change from video sender thread"""
+        self.quality_changed_signal.emit(quality_text)
+        
+    def _handle_quality_change_ui(self, quality_text):
+        """Handle quality change in UI thread"""
+        if self.meeting_screen:
+            self.meeting_screen.update_quality_display(quality_text)
 
     def on_leave_meeting(self):
         """Leave meeting"""

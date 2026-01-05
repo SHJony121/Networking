@@ -36,6 +36,7 @@ class VideoReceiver:
         self.frames_received = 0
         self.bytes_received = 0
         self.frames_lost = 0
+        self.last_packet_time = 0
         
         # Per-sender sequence tracking to properly calculate packet loss
         # {sender_addr: last_sequence_num}
@@ -109,6 +110,8 @@ class VideoReceiver:
             header = unpack_video_header(data)
             payload = data[VIDEO_HEADER_SIZE:]
             
+            self.last_packet_time = time.time()
+            
             # Check for lost frames - track per sender to avoid false positives
             # when receiving interleaved packets from multiple senders
             sender_key = addr  # Use sender address as key
@@ -177,16 +180,28 @@ class VideoReceiver:
     
     def get_stats(self):
         """Get receiver statistics"""
-        total_expected = self.frames_received + self.frames_lost
-        packet_loss_pct = (self.frames_lost / total_expected * 100) if total_expected > 0 else 0
+        
+        # Check if we're idle (no packets for > 1 second)
+        current_time = time.time()
+        is_idle = (current_time - self.last_packet_time) > 1.0
+        
+        if is_idle:
+            packet_loss_pct = 0
+            jitter_ms = 0
+            fps_recvd = 0
+        else:
+            total_expected = self.frames_received + self.frames_lost
+            packet_loss_pct = (self.frames_lost / total_expected * 100) if total_expected > 0 else 0
+            jitter_ms = self.jitter
+            fps_recvd = self.fps_received
         
         return {
             'frames_received': self.frames_received,
             'bytes_received': self.bytes_received,
             'frames_lost': self.frames_lost,
             'packet_loss_percent': packet_loss_pct,
-            'jitter_ms': self.jitter,
-            'fps_received': self.fps_received
+            'jitter_ms': jitter_ms,
+            'fps_received': fps_recvd
         }
     
     def calculate_rtt(self, send_timestamp_us):

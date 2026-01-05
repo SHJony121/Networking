@@ -8,12 +8,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import time
 import threading
 from collections import deque
+from PyQt5.QtCore import QObject, pyqtSignal
 from common.protocol import *
 
-class StatsCollector:
+class StatsCollector(QObject):
     """Collects and manages network statistics"""
     
+    # Signal to notify UI of stats updates (thread-safe)
+    stats_updated_signal = pyqtSignal(dict)
+    
     def __init__(self, video_sender, video_receiver, audio_sender, audio_receiver, tcp_control):
+        super().__init__()
         self.video_sender = video_sender
         self.video_receiver = video_receiver
         self.audio_sender = audio_sender
@@ -74,6 +79,10 @@ class StatsCollector:
                 self._send_heartbeat()
                 self._collect_stats()
                 self._apply_adaptive_logic()
+                
+                # Emit signal to UI
+                self.stats_updated_signal.emit(self.get_current_stats())
+                
                 self._send_stats_to_server()
                 time.sleep(STATS_UPDATE_INTERVAL)
             

@@ -30,6 +30,7 @@ class VideoSender:
         # Current quality settings
         self.current_quality = '360p'
         self.quality_settings = VIDEO_QUALITIES[self.current_quality]
+        self.quality_callback = None # Callback for quality changes
         
         # Frame tracking
         self.frame_id = 0
@@ -103,6 +104,13 @@ class VideoSender:
             self.current_quality = quality_name
             self.quality_settings = VIDEO_QUALITIES[quality_name]
             print(f"[VideoSender] Quality changed to {quality_name}")
+            
+            # Notify listener
+            if self.quality_callback:
+                try:
+                    self.quality_callback(quality_name)
+                except Exception as e:
+                    print(f"[VideoSender] Error in quality callback: {e}")
     
     def _send_loop(self):
         """Main sending loop"""
