@@ -67,6 +67,7 @@ class MeetingScreen(QWidget):
     send_file_signal = pyqtSignal(str, str)  # filepath, target
     toggle_mic_signal = pyqtSignal(bool)  # enabled
     toggle_camera_signal = pyqtSignal(bool)  # enabled
+    toggle_screen_share_signal = pyqtSignal(bool) # enabled
     leave_meeting_signal = pyqtSignal()
     show_stats_signal = pyqtSignal()
     
@@ -210,6 +211,34 @@ class MeetingScreen(QWidget):
         self.camera_btn.setStyleSheet(self.mic_btn.styleSheet()) # Reuse same style logic
         self.camera_btn.clicked.connect(self.on_toggle_camera)
         
+        # Screen Share Button
+        self.screen_share_btn = QPushButton("🖥️")
+        self.screen_share_btn.setFixedSize(60, 60)
+        self.screen_share_btn.setCheckable(True)
+        self.screen_share_btn.setChecked(False)
+        self.screen_share_btn.setCursor(Qt.PointingHandCursor)
+        self.screen_share_btn.setStyleSheet(f"""
+             QPushButton {{
+                background-color: {Theme.SURFACE_HOVER};
+                border-radius: 30px;
+                font-size: 24px;
+            }}
+            QPushButton:checked {{
+                background-color: {Theme.SECONDARY}; 
+                border: 2px solid {Theme.SECONDARY};
+                color: black;
+            }}
+            QPushButton:!checked {{
+                background-color: {Theme.SURFACE_HOVER};
+                border: none;
+                color: {Theme.TEXT_HIGH};
+            }}
+             QPushButton:hover {{
+                background-color: {Theme.PRIMARY};
+            }}
+        """)
+        self.screen_share_btn.clicked.connect(self.on_toggle_screen_share)
+        
         # Stats Button
         self.stats_btn = QPushButton("📊")
         self.stats_btn.setFixedSize(50, 50)
@@ -244,6 +273,8 @@ class MeetingScreen(QWidget):
         
         controls_layout.addWidget(self.mic_btn)
         controls_layout.addWidget(self.camera_btn)
+        controls_layout.addSpacing(15)
+        controls_layout.addWidget(self.screen_share_btn)
         controls_layout.addSpacing(20)
         controls_layout.addWidget(self.stats_btn)
         controls_layout.addSpacing(40)
@@ -494,6 +525,19 @@ class MeetingScreen(QWidget):
         """Toggle camera"""
         self.camera_enabled = self.camera_btn.isChecked()
         self.toggle_camera_signal.emit(self.camera_enabled)
+        
+        # If camera is turned ON, ensure screen share is OFF visually
+        if self.camera_enabled:
+             self.screen_share_btn.setChecked(False)
+
+    def on_toggle_screen_share(self):
+        """Toggle screen share"""
+        enabled = self.screen_share_btn.isChecked()
+        self.toggle_screen_share_signal.emit(enabled)
+        
+        # If screen share is ON, visually turn OFF camera button (logic handled in main)
+        if enabled:
+            self.camera_btn.setChecked(False)
     
     def set_mic_state(self, enabled):
         self.mic_enabled = enabled

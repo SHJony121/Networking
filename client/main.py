@@ -238,6 +238,7 @@ class ClientApplication(QStackedWidget):
         self.meeting_screen.send_file_signal.connect(self.on_send_file)
         self.meeting_screen.toggle_mic_signal.connect(self.on_toggle_mic)
         self.meeting_screen.toggle_camera_signal.connect(self.on_toggle_camera)
+        self.meeting_screen.toggle_screen_share_signal.connect(self.on_toggle_screen_share)
         self.meeting_screen.leave_meeting_signal.connect(self.on_leave_meeting)
         self.meeting_screen.show_stats_signal.connect(self.on_show_stats)
         
@@ -369,8 +370,8 @@ class ClientApplication(QStackedWidget):
         if not self.meeting_screen:
             return
         
-        # Update own video from video sender's latest frame (only if camera is enabled)
-        if self.video_sender and self.camera_enabled:
+        # Update own video from video sender's latest frame (only if camera is enabled OR screen sharing)
+        if self.video_sender and (self.camera_enabled or self.video_sender.is_screen_sharing):
             frame = self.video_sender.get_latest_frame()
             if frame is not None:
                 self.meeting_screen.update_video_frame('self', frame)
@@ -462,6 +463,11 @@ class ClientApplication(QStackedWidget):
         """Toggle camera"""
         print(f"[Client] ===== on_toggle_camera called: enabled={enabled} =====")
         self.camera_enabled = enabled
+        
+        # If camera is enabled, ensure screen share is disabled in sender
+        if enabled and self.video_sender:
+             self.video_sender.set_screen_sharing(False)
+        
         if self.video_sender:
             self.video_sender.set_enabled(enabled)
             print(f"[Client] Video sender enabled set to: {enabled}")
@@ -488,10 +494,42 @@ class ClientApplication(QStackedWidget):
             self.meeting_screen.show_no_video('self', self.client_name)
         
         # Clear video display when camera is turned off
-        if not enabled and self.meeting_screen:
-            self.meeting_screen.clear_video_frame('self')
+        # if not enabled and self.meeting_screen:
+        #    self.meeting_screen.clear_video_frame('self')
         
         print(f"[Client] ===== on_toggle_camera completed =====")
+
+    def on_toggle_screen_share(self, enabled):
+        """Toggle screen sharing"""
+        print(f"[Client] Screen sharing toggled: {enabled}")
+        
+        if self.video_sender:
+            # enable screen sharing mode
+            self.video_sender.set_screen_sharing(enabled)
+            
+            if enabled:
+                # If screen share is ON, we MUST enable the video sender 
+                # (even if camera was off)
+                self.video_sender.set_enabled(True)
+                
+                # Also visually update camera button state in UI handled in UI class
+                # But we should update our internal state
+                self.camera_enabled = False 
+                
+                # Notify server that "Camera" (Video stream) is ON
+                # So others see the screen share
+                if self.session and self.session.tcp_control:
+                    self.session.tcp_control.send_message(MSG_CAMERA_STATUS, enabled=True)
+            else:
+                 # If turning OFF screen share, assume we go back to "Camera OFF" state
+                 # Unless user explicitly turns camera on. 
+                 # For simplicity, turn off video when stopping screen share.
+                 self.video_sender.set_enabled(False)
+                 if self.session and self.session.tcp_control:
+                    self.session.tcp_control.send_message(MSG_CAMERA_STATUS, enabled=False)
+                 
+                 if self.meeting_screen:
+                    self.meeting_screen.show_no_video('self', self.client_name)
     
     def on_show_stats(self):
         """Show statistics window"""

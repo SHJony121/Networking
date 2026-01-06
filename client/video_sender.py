@@ -9,6 +9,8 @@ import cv2
 import time
 import socket
 import threading
+import mss
+import numpy as np
 from common.protocol import *
 
 class VideoSender:
@@ -23,6 +25,10 @@ class VideoSender:
         self.camera = None
         self.running = False
         self.enabled = True
+        self.sct_instance = None
+        
+        # Screen capture
+        self.is_screen_sharing = False
         
         # UDP socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -111,35 +117,84 @@ class VideoSender:
                     self.quality_callback(quality_name)
                 except Exception as e:
                     print(f"[VideoSender] Error in quality callback: {e}")
+
+    def set_screen_sharing(self, enabled):
+        """Toggle screen sharing mode"""
+        self.is_screen_sharing = enabled
+        print(f"[VideoSender] Screen sharing set to: {enabled}")
     
     def _send_loop(self):
         """Main sending loop"""
         target_fps = self.quality_settings['fps']
         frame_interval = 1.0 / target_fps
         
-        while self.running:
-            loop_start = time.time()
+        # Initialize mss here (in the thread) for safety and performance
+        with mss.mss() as sct:
+            self.sct_instance = sct
             
-            if self.enabled:
-                self._capture_and_send_frame()
-            
-            # Maintain target FPS
-            elapsed = time.time() - loop_start
-            sleep_time = frame_interval - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            
-            # Update FPS dynamically
-            target_fps = self.quality_settings['fps']
-            frame_interval = 1.0 / target_fps
-    
+            while self.running:
+                loop_start = time.time()
+                
+                if self.enabled:
+                    self._capture_and_send_frame()
+                
+                # Maintain target FPS
+                elapsed = time.time() - loop_start
+                sleep_time = frame_interval - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                
+                # Update FPS dynamically
+                target_fps = self.quality_settings['fps']
+                frame_interval = 1.0 / target_fps
+                
+        self.sct_instance = None # Cleanup
+
     def _capture_and_send_frame(self):
         """Capture and send a single frame"""
         try:
-            # Capture frame
-            ret, frame = self.camera.read()
-            if not ret:
-                print("[VideoSender] Failed to read frame from camera")
+            frame = None
+            
+            if self.is_screen_sharing:
+                # Capture screen using the thread-local instance
+                try:
+                    sct = self.sct_instance
+                    if not sct:
+                         # Should not happen given the context manager in loop
+                         return
+
+                    # monitor 1 is usually the main monitor
+                    if len(sct.monitors) > 1:
+                        monitor = sct.monitors[1]
+                    else:
+                         monitor = sct.monitors[0] # Fallback
+                    
+                    screenshot = sct.grab(monitor)
+                    
+                    # Convert to numpy array (BGRA)
+                    frame = np.array(screenshot)
+                    
+                    if self.frames_sent % 30 == 0: # Log more often for debug
+                        print(f"[VideoSender] Screen capture size: {frame.shape}")
+                        
+                    # Drop alpha channel (BGRA -> BGR)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                except Exception as sct_e:
+                    print(f"[VideoSender] Screen share error: {sct_e}")
+                    self.is_screen_sharing = False # Fallback
+                    return
+                
+            else:
+                # Capture camera
+                if self.camera:
+                    ret, cam_frame = self.camera.read()
+                    if ret:
+                        frame = cam_frame
+                    else:
+                        print("[VideoSender] Failed to read frame from camera")
+                        return
+
+            if frame is None:
                 return
             
             # Debug: Log first frame capture and check if frame is black
