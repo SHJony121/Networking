@@ -16,8 +16,9 @@ from common.protocol import *
 class VideoReceiver:
     """Receives video frames via UDP"""
     
-    def __init__(self, local_udp_port):
+    def __init__(self, local_udp_port, simulated_loss_rate=0.0):
         self.local_udp_port = local_udp_port
+        self.simulated_loss_rate = simulated_loss_rate
         
         # UDP socket
         self.socket = None
@@ -89,12 +90,23 @@ class VideoReceiver:
         while self.running:
             try:
                 data, addr = self.socket.recvfrom(65535)
+                
+                # Simulate packet loss (Download)
+                if self.simulated_loss_rate > 0:
+                    import random
+                    if random.uniform(0, 100) < self.simulated_loss_rate:
+                        # Drop this packet
+                        continue
+                        
                 received_count += 1
                 if received_count % 100 == 0:  # Log every 100 packets
                     print(f"[VideoReceiver] Received {received_count} packets, latest from {addr}")
                 self._process_packet(data, addr)
             
             except socket.timeout:
+                if self.running:
+                    continue
+            except Exception as e:
                 continue
             except Exception as e:
                 if self.running:

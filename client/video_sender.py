@@ -16,10 +16,11 @@ from common.protocol import *
 class VideoSender:
     """Captures video and sends it to server via UDP"""
     
-    def __init__(self, server_host, server_udp_port, camera_index=0):
+    def __init__(self, server_host, server_udp_port, camera_index=0, simulated_loss_rate=0.0):
         self.server_host = server_host
         self.server_udp_port = server_udp_port
         self.camera_index = camera_index
+        self.simulated_loss_rate = simulated_loss_rate
         
         # Video capture
         self.camera = None
@@ -240,7 +241,16 @@ class VideoSender:
             packet = header + payload
             if self.frames_sent == 0:  # Log first packet
                 print(f"[VideoSender] Sending first packet to {self.server_host}:{self.server_udp_port}, size={len(packet)} bytes")
-            self.socket.sendto(packet, (self.server_host, self.server_udp_port))
+            
+            # Simulate packet loss
+            should_send = True
+            if self.simulated_loss_rate > 0:
+                import random
+                if random.uniform(0, 100) < self.simulated_loss_rate:
+                    should_send = False
+            
+            if should_send:
+                self.socket.sendto(packet, (self.server_host, self.server_udp_port))
             
             # Update counters
             self.frame_id = (self.frame_id + 1) % (2**32)
@@ -276,27 +286,34 @@ class VideoSender:
     def adjust_quality(self, packet_loss, rtt, target_fps=None):
         """
         Adjust video quality based on network conditions
-        packet_loss: percentage
-        rtt: milliseconds
+        User Rules:
+        > 15% loss -> 144p
+        > 10% loss -> 240p
+        > 2%  loss -> 360p
+        <= 2% loss -> 480p
         """
-        quality_levels = ['144p', '240p', '360p', '480p']
-        current_index = quality_levels.index(self.current_quality)
+        # Determine target quality based on strict thresholds
+        target_quality = '480p' # Default best
         
-        # Determine if we should increase or decrease quality
-        if packet_loss > PACKET_LOSS_HIGH_THRESHOLD or rtt > RTT_HIGH_THRESHOLD:
-            # Network conditions poor - decrease quality
-            if current_index > 0:
-                new_quality = quality_levels[current_index - 1]
-                self.set_quality(new_quality)
-                print(f"[VideoSender] Degrading quality due to network: loss={packet_loss}%, rtt={rtt}ms")
+        if packet_loss > 15:
+            target_quality = '144p'
+        elif packet_loss > 10:
+            target_quality = '240p'
+        elif packet_loss > 2:
+            target_quality = '360p'
+        else:
+            # Loss is low (<= 2%), but check Latency
+            # If ping is extremely high (>400ms), don't force 480p
+            if rtt > 400:
+                target_quality = '360p'
+            else:
+                target_quality = '480p'
         
-        elif packet_loss < PACKET_LOSS_LOW_THRESHOLD and rtt < RTT_LOW_THRESHOLD:
-            # Network conditions good - increase quality
-            if current_index < len(quality_levels) - 1:
-                new_quality = quality_levels[current_index + 1]
-                self.set_quality(new_quality)
-                print(f"[VideoSender] Improving quality: loss={packet_loss}%, rtt={rtt}ms")
-        
+        # Apply change if different
+        if self.current_quality != target_quality:
+            print(f"[VideoSender] Adapting quality: {self.current_quality} -> {target_quality} (Loss={packet_loss:.1f}%, RTT={rtt:.0f}ms)")
+            self.set_quality(target_quality)
+    
         # Adjust FPS if specified
         if target_fps:
             self.quality_settings['fps'] = max(5, min(target_fps, 30))

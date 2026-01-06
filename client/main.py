@@ -37,12 +37,13 @@ class ClientApplication(QStackedWidget):
     camera_status_signal = pyqtSignal(str, bool)  # participant_name, camera_enabled
     quality_changed_signal = pyqtSignal(str) # quality_text
     
-    def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001):
+    def __init__(self, server_host='127.0.0.1', server_tcp_port=5000, server_udp_port=5001, simulated_loss_rate=0.0):
         super().__init__()
         
         self.server_host = server_host
         self.server_tcp_port = server_tcp_port
         self.server_udp_port = server_udp_port
+        self.simulated_loss_rate = simulated_loss_rate
         
         # Session
         self.session = None
@@ -290,7 +291,12 @@ class ClientApplication(QStackedWidget):
         camera_index = int(os.environ.get('CAMERA_INDEX', 0))
         print(f"[Client] Using camera index: {camera_index}")
         
-        self.video_sender = VideoSender(self.server_host, self.server_udp_port, camera_index=camera_index)
+        self.video_sender = VideoSender(
+            self.server_host, 
+            self.server_udp_port, 
+            camera_index=camera_index,
+            simulated_loss_rate=self.simulated_loss_rate
+        )
         if self.camera_enabled:
             self.video_sender.start()
         else:
@@ -301,7 +307,7 @@ class ClientApplication(QStackedWidget):
         self.video_sender.quality_callback = self._on_sender_quality_changed
         
         # Video receiver (use port 0 to let OS assign a free port)
-        self.video_receiver = VideoReceiver(0)
+        self.video_receiver = VideoReceiver(0, simulated_loss_rate=self.simulated_loss_rate)
 
         self.video_receiver.start()
         print(f"[Client] Video receiver listening on port {self.video_receiver.local_udp_port}")
@@ -709,6 +715,7 @@ def main():
     parser.add_argument('--tcp-port', type=int, default=5000, help='Server TCP port (default: 5000)')
     parser.add_argument('--udp-port', type=int, default=5001, help='Server UDP port (default: 5001)')
     parser.add_argument('--camera', type=int, help='Camera index (e.g., 0 for laptop, 1 for iVCam)')
+    parser.add_argument('--drop-rate', type=float, default=0.0, help='Simulated packet loss rate 0-100 (default: 0)')
     
     args = parser.parse_args()
     
@@ -721,7 +728,8 @@ def main():
     client = ClientApplication(
         server_host=args.server,
         server_tcp_port=args.tcp_port,
-        server_udp_port=args.udp_port
+        server_udp_port=args.udp_port,
+        simulated_loss_rate=args.drop_rate
     )
     client.show()
     sys.exit(app.exec_())
