@@ -54,27 +54,40 @@ class StreamRelayUDP:
     def handle_packet(self, data, sender_addr):
         """Handle incoming UDP packet and relay to appropriate recipients"""
         try:
-            # Determine packet type (video or audio) by header size
+            # Determine packet type (video or audio) by header parsing and validation
+            
+            # 1. Try Video
             if len(data) >= VIDEO_HEADER_SIZE:
-                # Try to parse as video packet
                 try:
                     header = unpack_video_header(data)
-                    self.relay_video_packet(data, sender_addr)
-                    return
+                    # VALIDATION: Check if payload size matches actual data length
+                    expected_payload_size = header['payload_size']
+                    actual_payload_size = len(data) - VIDEO_HEADER_SIZE
+                    
+                    if expected_payload_size == actual_payload_size:
+                        self.relay_video_packet(data, sender_addr)
+                        return
+                    # Else: Not a video packet (or corrupted), fall through to check audio
                 except:
                     pass
             
+            # 2. Try Audio
             if len(data) >= AUDIO_HEADER_SIZE:
-                # Try to parse as audio packet
                 try:
                     header = unpack_audio_header(data)
-                    self.relay_audio_packet(data, sender_addr)
-                    return
+                    # VALIDATION: Check if payload size matches actual data length
+                    expected_payload_size = header['payload_size']
+                    actual_payload_size = len(data) - AUDIO_HEADER_SIZE
+                    
+                    if expected_payload_size == actual_payload_size:
+                        self.relay_audio_packet(data, sender_addr)
+                        return
                 except:
                     pass
             
             # Unknown packet type
-            print(f"[StreamRelay] Unknown packet type from {sender_addr}")
+            # Only print occasionally to avoid spam if it's just noise
+            # print(f"[StreamRelay] Unknown packet type from {sender_addr}, len={len(data)}")
         
         except Exception as e:
             print(f"[StreamRelay] Error handling packet from {sender_addr}: {e}")
