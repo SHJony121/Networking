@@ -385,11 +385,12 @@ class ControlHandler:
         if client_info:
             # Get client's IP from TCP socket
             client_ip = client_socket.getpeername()[0]
-            udp_addr = (client_ip, video_port)
+            video_addr = (client_ip, video_port)
+            audio_addr = (client_ip, audio_port)
             
             # Update UDP address in meeting manager
-            self.meeting_manager.update_udp_address(client_socket, udp_addr)
-            print(f"[ControlHandler] Registered UDP for {client_info['name']}: {udp_addr}")
+            self.meeting_manager.update_udp_address(client_socket, video_addr, audio_addr)
+            print(f"[ControlHandler] Registered UDP for {client_info['name']}: video={video_addr}, audio={audio_addr}")
         else:
             print(f"[ControlHandler] No client info found for socket")
     

@@ -60,7 +60,9 @@ class MeetingManager:
                 'name': host_name,
                 'meeting': meeting_code,
                 'is_host': True,
-                'udp_addr': None
+                'is_host': True,
+                'video_addr': None,
+                'audio_addr': None
             }
         
         print(f"[MeetingManager] Meeting {meeting_code} created by {host_name}")
@@ -86,7 +88,9 @@ class MeetingManager:
                 'name': client_name,
                 'meeting': meeting_code,
                 'is_host': False,
-                'udp_addr': None
+                'is_host': False,
+                'video_addr': None,
+                'audio_addr': None
             }
         
         print(f"[MeetingManager] {client_name} requested to join {meeting_code}")
@@ -197,12 +201,13 @@ class MeetingManager:
         with self.lock:
             return self.client_info.get(client_socket)
     
-    def update_udp_address(self, client_socket, udp_addr):
-        """Update client's UDP address for stream relay"""
+    def update_udp_address(self, client_socket, video_addr, audio_addr):
+        """Update client's UDP addresses for stream relay"""
         with self.lock:
             if client_socket in self.client_info:
-                self.client_info[client_socket]['udp_addr'] = udp_addr
-                print(f"[MeetingManager] Updated UDP address for client: {udp_addr}")
+                self.client_info[client_socket]['video_addr'] = video_addr
+                self.client_info[client_socket]['audio_addr'] = audio_addr
+                print(f"[MeetingManager] Updated UDP addresses for client: video={video_addr}, audio={audio_addr}")
     
     def get_meeting_participants(self, meeting_code: str) -> List:
         """Get list of participant sockets in a meeting"""

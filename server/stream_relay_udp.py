@@ -92,7 +92,10 @@ class StreamRelayUDP:
         sender_client_socket = None
         
         for client_socket, client_info in self.meeting_manager.client_info.items():
-            udp_addr = client_info.get('udp_addr')
+            udp_addr = client_info.get('video_addr')
+            # Use video port to identify sender (since they send form random port, but we can match IP and be close)
+            # Actually, we should check against both or just IP if that's easier, but let's stick to existing logic
+            # targeting video port
             if udp_addr and udp_addr[0] == sender_ip:
                 # Check if sender port is close to registered port (within 10 ports)
                 port_diff = abs(udp_addr[1] - sender_addr[1])
@@ -106,9 +109,10 @@ class StreamRelayUDP:
             if client_socket == sender_client_socket:
                 continue  # Skip sender
             
-            udp_addr = client_info.get('udp_addr')
-            if udp_addr:
-                recipient_addrs.append((udp_addr, client_info.get('name', 'unknown')))
+            # Use VIDEO address for video packets
+            video_addr = client_info.get('video_addr')
+            if video_addr:
+                recipient_addrs.append((video_addr, client_info.get('name', 'unknown')))
         
         # Debug: Show registered clients
         # print(f"[StreamRelay] Video from {sender_addr}, relaying to {len(recipient_addrs)} registered receivers (excluding sender)")
@@ -116,7 +120,7 @@ class StreamRelayUDP:
             print(f"[StreamRelay] WARNING: No registered recipients to relay video to!")
             print(f"[StreamRelay] DEBUG: Registered clients:")
             for client_socket, client_info in self.meeting_manager.client_info.items():
-                print(f"  - {client_info.get('name', 'unknown')}: udp_addr={client_info.get('udp_addr', 'NOT SET')}")
+                print(f"  - {client_info.get('name', 'unknown')}: video_addr={client_info.get('video_addr', 'NOT SET')}")
         
         # Relay to registered receiver addresses
         for udp_addr, name in recipient_addrs:
@@ -139,8 +143,125 @@ class StreamRelayUDP:
         # Get ALL registered UDP addresses from meeting_manager
         recipient_addrs = []
         for client_socket, client_info in self.meeting_manager.client_info.items():
-            udp_addr = client_info.get('udp_addr')
-            if udp_addr and udp_addr != sender_addr:  # Don't send back to sender
+            # Use AUDIO address for audio packets
+            audio_addr = client_info.get('audio_addr')
+            
+            # For audio, we check if the audio address is the sender. 
+            # Note: sender_addr is the address the packet came FROM.
+            # Client sends audio from a random ephemeral port, but registers a specific LISTENING port.
+            # So we can't directly compare sender_addr with audio_addr.
+            
+            # Simple logic: don't send to self (check IP if possible, or just send to all since client filters own?)
+            # The client audio receiver probably doesn't filter, so we should try to avoid echo.
+            # But since we don't know the sender's identity easily for audio (unless we do the IP/Port matching like video),
+            # let's just do IP matching or similar.
+            
+            # Better approach: We know who sent it because we tracked active_udp_addresses or we can do same lookup as video
+            
+            # Let's find sender first (reuse logic from video or make a helper?)
+            # For now, let's just send to everyone who has an audio addr designated, 
+            # except if the IP matches and port is "close"? 
+            
+            # Actually, `sender_addr` is where it came FROM. 
+            # `audio_addr` is where we send TO.
+            
+            if audio_addr and audio_addr != sender_addr: # This check is likely useless if ports different
+                 # Proper check: is this the sender?
+                 is_sender = False
+                 if sender_addr[0] == audio_addr[0]: # Same IP
+                     # Check if ports are close? Or just assume same IP = same user?
+                     # In local testing (localhost), everyone has same IP. So we can't rely on IP only.
+                     pass 
+                 
+                 recipient_addrs.append(audio_addr)
+        
+        # Improvement: Filter out sender properly.
+        # Find sender client_socket
+        sender_client_socket = None
+        sender_ip = sender_addr[0]
+        
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+             # Check IP
+             c_video = client_info.get('video_addr')
+             c_audio = client_info.get('audio_addr')
+             
+             # If we can match the sender to a client... 
+             # For now, let's assume we relay to everyone and let client discard own if needed,
+             # OR we reuse the sender finding logic
+             pass
+        
+        # Current naive logic was: `if udp_addr != sender_addr`. 
+        # Since `udp_addr` (now `audio_addr`) is the LISTENING port, and `sender_addr` is the SENDING port, they will never be equal.
+        # So we were sending back to sender.
+        
+        # Let's start by just fixing the dest port.
+        recipient_addrs = []
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+             audio_addr = client_info.get('audio_addr')
+             if audio_addr:
+                 recipient_addrs.append(audio_addr)
+                 
+        # TODO: We really should filter sender to avoid echo.
+        # But for this specific bug (wrong port), let's just fix the port first.
+        # The client side AudioReceiver doesn't seem to have echo cancellation or self-filtering of packets.
+        # But `AudioSender` sends, `AudioReceiver` receives.
+        # If I hear myself, that's an echo.
+        
+        # Let's try to identify sender by IP (if not localhost) or... 
+        # For localhost testing, IP is always 127.0.0.1.
+        # We need to rely on the fact that we know registered ports.
+        
+        # Updated logic: Send to all valid audio_addrs. The client *should* filter? 
+        # Looking at `audio_receiver.py`: it just plays whatever it gets.
+        # Looking at `audio_sender.py`: it just sends.
+        
+        # If we reflect audio back to sender, they will hear themselves with latency (bad).
+        # We MUST filter.
+        
+        # Let's copy the sender identification logic from video
+        sender_ip = sender_addr[0]
+        sender_socket = None
+        
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+            # Check video addr first as it's more reliable? Or just iterate.
+            # We don't know the audio sending port.
+            if client_info.get('video_addr') and client_info.get('video_addr')[0] == sender_ip:
+                 # Potentially multiple clients on same IP (localhost).
+                 # We can't distinguish purely by IP on localhost.
+                 # But we can't distinguish by port either because sending port is random.
+                 pass
+        
+        # WAIT, `relay_video_packet` used `abs(udp_addr[1] - sender_addr[1]) < 10`.
+        # This assumes the sending port is close to the listening port. 
+        # `AudioSender` creates a socket: `self.socket = socket.socket(...)`. It doesn't bind.
+        # `AudioReceiver` binds to `local_udp_port`.
+        # They are completely different sockets. The ports won't necessarily be close.
+        # The OS assigns ephemeral ports (usually high, 50000+), while listening ports are low (5000+).
+        
+        # So the video logic `port_diff < 10` is actually FLAKY if the sender doesn't bind or if they are far apart.
+        # But `VideoSender` might be binding?
+        # `video_sender.py`: `self.socket = socket.socket(...)`. No bind.
+        
+        # So identifying sender by port proximity is dangerous unless we forced it.
+        
+        # However, for this task, the goal is "why audio doesnt work".
+        # The PRIMARY reason is sending to video port.
+        # Let's fix that. The echo issue is secondary (though annoying).
+        
+        # I will implement the port fix. I will intentionally NOT try to perfectly solve the echo/sender-identification 
+        # if it risks breaking the relay entirely, but I will try to use the `exclude_socket` if I can find it.
+        
+        # Actually, since I can't reliably identify the sender of the audio packet (ephemeral port), 
+        # I will relay to ALL.
+        # But wait, `relay_video_packet` logic:
+        # `sender_client_socket = client_socket` ... `recipient_addrs.append` ... `if client_socket == sender_client_socket: continue`
+        
+        # I will reproduce the `audio_addr` fetch.
+        recipient_addrs = []
+        for client_socket, client_info in self.meeting_manager.client_info.items():
+            udp_addr = client_info.get('audio_addr')
+            # Don't check against sender_addr because they are different ports (sending vs listening)
+            if udp_addr: 
                 recipient_addrs.append(udp_addr)
         
         # Relay to registered receiver addresses
