@@ -64,6 +64,13 @@ class TCPFileTransfer:
         self.chunks_sent = 0
         self.chunks_acked = 0
         
+        # Reset transfer state completely
+        with self.lock:
+            self.unacked_chunks = set()
+            self.chunk_send_times = {}
+            self.packet_buffer = {}
+            self.last_acked_chunk = -1
+        
         # Reset congestion control
         self.cwnd = INITIAL_CWND
         self.ssthresh = INITIAL_SSTHRESH
@@ -175,7 +182,7 @@ class TCPFileTransfer:
                 data=data_b64,
                 target_name=self.target
             )
-            print(f"[FileTransfer] SEND CHUNK {chunk_id} (cwnd={self.cwnd})")
+            # print(f"[FileTransfer] SEND CHUNK {chunk_id} (cwnd={self.cwnd}, in_flight={len(self.unacked_chunks)})")
             if chunk_id > self.last_acked_chunk: # Only count new progress
                 self.bytes_sent = max(self.bytes_sent, (chunk_id + 1) * BASE_CHUNK_SIZE) # Approx
                 self.chunks_sent = max(self.chunks_sent, chunk_id + 1)

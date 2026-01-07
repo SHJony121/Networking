@@ -323,6 +323,8 @@ class ControlHandler:
     
     def handle_file_chunk(self, client_socket, msg):
         """Handle FILE_CHUNK message"""
+        chunk_id = msg.get('chunk_id')
+        # print(f"[ControlHandler] Forwarding chunk {chunk_id} from {client_socket.getpeername()}") 
         self.forward_file_message(client_socket, msg, MSG_FILE_CHUNK_FORWARD)
     
     def handle_file_end(self, client_socket, msg):
