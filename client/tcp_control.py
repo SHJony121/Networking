@@ -72,7 +72,7 @@ class TCPControl:
     
     def send_message(self, msg_type, **kwargs):
         """Send a message to the server"""
-        print(f"[TCPControl] send_message called: type={msg_type}, socket={self.socket}, kwargs={kwargs}")
+        # print(f"[TCPControl] send_message called: type={msg_type}, socket={self.socket}, kwargs={kwargs}")
         
         if not self.socket:
             raise Exception("Not connected to server")
@@ -265,6 +265,11 @@ class ClientSession:
     def send_chat(self, message, target_name="Everyone"):
         """Send a chat message"""
         self.tcp_control.send_message(MSG_CHAT, message=message, target_name=target_name)
+    
+    def send_file_ack(self, chunk_id, target_name):
+        """Send ACK for file chunk"""
+        # We need to send this to the SENDER of the file
+        self.tcp_control.send_message(MSG_FILE_ACK, chunk_id=chunk_id, target_name=target_name)
     
     def register_udp_ports(self, video_port, audio_port):
         """Register UDP receiving ports with server"""

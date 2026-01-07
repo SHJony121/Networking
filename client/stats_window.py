@@ -180,11 +180,20 @@ class StatsWindow(QDialog):
                 cwnd_history = stats.get('cwnd_history', [])
                 if cwnd_history:
                     x = list(range(len(cwnd_history)))
-                    self.ax_cwnd.plot(x, cwnd_history, 'orange', linewidth=2)
-                    self.ax_cwnd.set_title(f"Congestion Window - Current: {stats.get('cwnd', 0)}")
-                    self.ax_cwnd.set_ylim(0, max(cwnd_history) * 1.2)
+                    self.ax_cwnd.plot(x, cwnd_history, 'orange', linewidth=2, label='cwnd')
+                    
+                    # Also plot ssthresh if available
+                    ssthresh = stats.get('ssthresh', 0)
+                    if ssthresh > 0:
+                        self.ax_cwnd.axhline(y=ssthresh, color='gray', linestyle='--', alpha=0.7, label='ssthresh')
+                        self.ax_cwnd.text(0, ssthresh + 0.5, f'ssthresh ({ssthresh})', color='gray', fontsize=8)
+
+                    timeout_val = stats.get('timeout_interval', 2.0)
+                    self.ax_cwnd.set_title(f"Congestion Window: {stats.get('cwnd', 0):.2f} (TO: {timeout_val:.2f}s)")
+                    self.ax_cwnd.set_ylim(0, max(max(cwnd_history), 20) * 1.2)
+                    self.ax_cwnd.legend(loc='upper left', fontsize='small')
                 else:
-                    self.ax_cwnd.text(0.5, 0.5, 'No file transfer', 
+                    self.ax_cwnd.text(0.5, 0.5, 'Starting transfer...', 
                                      ha='center', va='center', transform=self.ax_cwnd.transAxes)
             else:
                 self.ax_cwnd.text(0.5, 0.5, 'No file transfer', 

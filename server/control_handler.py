@@ -329,6 +329,11 @@ class ControlHandler:
         """Handle FILE_END message"""
         self.forward_file_message(client_socket, msg, MSG_FILE_END_NOTIFY)
     
+    def handle_file_ack(self, client_socket, msg):
+        """Handle FILE_ACK message"""
+        # Forward ACK back to the sender
+        self.forward_file_message(client_socket, msg, MSG_FILE_ACK)
+    
     def handle_video_stats(self, client_socket, msg):
         """Handle VIDEO_STATS from receiver"""
         # Stats from receiver about video quality
@@ -362,6 +367,7 @@ class ControlHandler:
     def handle_heartbeat(self, client_socket, msg):
         """Handle HEARTBEAT message - echo back timestamp for RTT calculation"""
         timestamp = msg.get('timestamp', 0)
+        # print(f"[ControlHandler] Received message from {client_socket.getpeername()}: HEARTBEAT")
         response = pack_tcp_message(MSG_HEARTBEAT_ACK, timestamp=timestamp)
         try:
             client_socket.sendall(response)

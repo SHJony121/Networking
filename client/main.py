@@ -31,7 +31,7 @@ class ClientApplication(QStackedWidget):
     
     # File transfer signals
     file_start_signal = pyqtSignal(str, int)  # filename, filesize
-    file_chunk_signal = pyqtSignal(int, str)  # chunk_id, data_b64
+    file_chunk_signal = pyqtSignal(int, str, str)  # chunk_id, data_b64, sender_name
     file_end_signal = pyqtSignal(str)  # checksum
     chat_signal = pyqtSignal(str, str, bool)  # sender, message, is_private
     camera_status_signal = pyqtSignal(str, bool)  # participant_name, camera_enabled
@@ -341,6 +341,7 @@ class ClientApplication(QStackedWidget):
         self.session.tcp_control.register_handler(MSG_FILE_START_NOTIFY, self.on_file_start)
         self.session.tcp_control.register_handler(MSG_FILE_CHUNK_FORWARD, self.on_file_chunk)
         self.session.tcp_control.register_handler(MSG_FILE_END_NOTIFY, self.on_file_end)
+        self.session.tcp_control.register_handler(MSG_FILE_ACK, self.on_file_ack)
         
         # Register UDP ports with server
         try:
@@ -450,6 +451,7 @@ class ClientApplication(QStackedWidget):
     
     def on_send_file(self, filepath, target="Everyone"):
         """Send file"""
+        print(f"[Main] on_send_file called for {filepath}")
         if self.file_transfer:
             import threading
             thread = threading.Thread(
@@ -679,12 +681,22 @@ class ClientApplication(QStackedWidget):
         """Handle file chunk message"""
         chunk_id = msg.get('chunk_id')
         data = msg.get('data')
-        self.file_chunk_signal.emit(chunk_id, data)
+        sender_name = msg.get('sender_name')
+        print(f"[Main] on_file_chunk signal emit: {chunk_id} from {sender_name}")
+        self.file_chunk_signal.emit(chunk_id, data, sender_name)
 
     def on_file_end(self, msg):
         """Handle file end message"""
         checksum = msg.get('checksum')
         self.file_end_signal.emit(checksum)
+
+    def on_file_ack(self, msg):
+        """Handle file ACK message"""
+        chunk_id = msg.get('chunk_id')
+        print(f"[Main] on_file_ack: {chunk_id}")
+        # Direct call to file transfer logic (thread safe because of internal lock)
+        if self.file_transfer:
+            self.file_transfer.on_ack_received(chunk_id)
 
     # UI/Main Thread File Handlers
     def _handle_file_start_ui(self, filename, filesize):
@@ -694,10 +706,13 @@ class ClientApplication(QStackedWidget):
             if self.meeting_screen:
                 self.meeting_screen.add_chat_message("System", f"Receiving file: {filename} ({filesize} bytes)...")
 
-    def _handle_file_chunk_ui(self, chunk_id, data_b64):
+    def _handle_file_chunk_ui(self, chunk_id, data_b64, sender_name):
         """Handle file chunk in main thread"""
         if self.file_receiver:
             self.file_receiver.receive_chunk(chunk_id, data_b64)
+            # Send ACK back to sender
+            if self.session:
+                self.session.send_file_ack(chunk_id, sender_name)
 
     def _handle_file_end_ui(self, checksum):
         """Handle file end in main thread"""

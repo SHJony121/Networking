@@ -111,7 +111,7 @@ class StreamRelayUDP:
                 recipient_addrs.append((udp_addr, client_info.get('name', 'unknown')))
         
         # Debug: Show registered clients
-        print(f"[StreamRelay] Video from {sender_addr}, relaying to {len(recipient_addrs)} registered receivers (excluding sender)")
+        # print(f"[StreamRelay] Video from {sender_addr}, relaying to {len(recipient_addrs)} registered receivers (excluding sender)")
         if len(recipient_addrs) == 0:
             print(f"[StreamRelay] WARNING: No registered recipients to relay video to!")
             print(f"[StreamRelay] DEBUG: Registered clients:")
