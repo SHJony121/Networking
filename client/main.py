@@ -291,6 +291,7 @@ class ClientApplication(QStackedWidget):
         camera_index = int(os.environ.get('CAMERA_INDEX', 0))
         print(f"[Client] Using camera index: {camera_index}")
         
+        self.video_sender = VideoSender(
             self.server_host, 
             self.server_udp_port, 
             client_name=self.client_name,
