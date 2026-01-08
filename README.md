@@ -85,6 +85,14 @@ Networking/
 
 <br/>
 
+## 🧩 Block Diagram
+
+<p align="center">
+  <img src="assets/block.jfif" alt="System Block Diagram" width="90%">
+</p>
+
+<br/>
+
 ## 💿 Installation & Setup
 
 Follow these steps to get the system running on your local machine.
