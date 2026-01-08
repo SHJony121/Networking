@@ -1,122 +1,169 @@
-# 🎥 Multi-Client Real-Time Communication System
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)
-![PyQt5](https://img.shields.io/badge/GUI-PyQt5-green?style=for-the-badge&logo=qt&logoColor=white)
-![Networking](https://img.shields.io/badge/Networking-TCP%2FUDP-orange?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-lightgrey?style=for-the-badge)
+<!-- Uses the user's requested style -->
 
-> A powerful, desktop-based video conferencing application built entirely with **pure Python sockets**. Experience real-time video, audio, chat, and file sharing without the need for third-party WebRTC libraries.
+<h1 align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=600&size=28&pause=1000&color=F59E0B&center=true&vCenter=true&random=false&width=435&lines=Multi-Client+Communication;Pure+Python+Sockets;Real-Time+Video+%26+Audio;Secure+File+Sharing" alt="Typing SVG" />
+</h1>
 
----
+<p align="center">
+  <strong>🌐 Advanced Real-Time Communication System from Scratch</strong>
+  <br/>
+  <sub>A distributed networking system showcasing custom protocol implementations in Pure Python</sub>
+</p>
 
-## 🌟 Key Features
+<p align="center">
+  <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick_Start-→-6366F1?style=for-the-badge" alt="Quick Start"/></a>
 
-- **📹 Real-Time Video Streaming**
-  Low-latency UDP streaming with adaptive quality (144p - 480p) that adjusts to your network speed.
+  <a href="#-authors"><img src="https://img.shields.io/badge/Authors-→-181717?style=for-the-badge&logo=github" alt="Authors"/></a>
+</p>
 
-- **🎤 Interactive Audio**
-  Clear, real-time voice communication using raw PCM audio data over UDP.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/GUI-PyQt5-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt5">
+  <img src="https://img.shields.io/badge/Protocol-UDP_%26_TCP-FF6B35?style=flat-square" alt="Protocols">
+  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="License">
+</p>
 
-- **💬 Robust Chat System**
-  Reliable TCP-based instant messaging supporting both broadcast (everyone) and private user-to-user chats.
+<br/>
 
-- **📁 Smart File Transfer**
-  Send files reliably with a custom implementation of **TCP Reno** congestion control (Slow Start, Congestion Avoidance, Fast Retransmit).
+<!-- Fancy Divider -->
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
+</p>
 
-- **🛡️ Secure Meeting Rooms**
-  Host-controlled environment with approval workflows for new participants.
+## 🎯 What is this Project?
 
-- **📊 Live Network Analytics**
-  Visualize network health in real-time with graphs for RTT, Packet Loss, Jitter, and Bitrate.
+This **Multi-Client Real-Time Communication System** is a comprehensive application built entirely from scratch using **pure Python sockets**. Unlike modern apps that rely on WebRTC, this project demonstrates the raw engineering behind:
+- **UDP** for low-latency Real-Time Streaming (Video/Audio)
+- **TCP** for reliable Control Signaling and Chat
+- **Application-Layer Congestion Control** (TCP Reno)
+- **Adaptive Quality** based on network metrics
 
----
+<br/>
 
-## 📁 Project Structure
+## ⚡ Key Features
 
-```bash
-Networking/
-├── server/                 # Central server logic
-│   ├── server_main.py      # Entry point
-│   ├── stream_relay_udp.py # UDP Media Relay
-│   └── meeting_manager.py  # specific meeting logic
-├── client/                 # Client application
-│   ├── main.py             # Entry point
-│   ├── video_sender.py     # Camera capture & streaming
-│   ├── audio_sender.py     # Mic capture & streaming
-│   └── ui_meeting.py       # Main GUI Layout
-└── common/                 # Shared protocols & utils
-```
+<table>
+<tr>
+<td width="50%">
 
----
+### 📹 Real-Time Streaming
+- **Video:** Custom UDP packetization with adaptive resolution (144p-480p).
+- **Audio:** Low-latency raw PCM audio over UDP.
+- **Traffic Shaping:** Token bucket algorithm for smooth delivery.
+- **Header:** Custom binary struct header (24 bytes).
 
-## 🚀 Getting Started
+</td>
+<td width="50%">
+
+### 💬 Collaborative Tools
+- **Rich Chat:** Persistent TCP connection for instant messaging.
+- **File Transfer:** Custom reliable transfer with **TCP Reno** congestion control.
+- **Visual Stats:** Real-time graphs for RTT, Jitter, Packet Loss, and Bitrate.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🛡️ Meeting Management
+- **Security:** Host approval workflow for joining participants.
+- **Privacy:** Private messaging and private file sharing.
+- **Architecture:** Centralized Server-Relay topology.
+
+</td>
+<td width="50%">
+
+### 💻 Modern Interface
+- **PyQt5 GUI:** Responsive grid layout similar to Google Meet.
+- **Async UI:** Threaded architecture prevents freezing during network I/O.
+- **Feedback:** Live status updates and connection health indicators.
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+
+
+## 🚀 Quick Start
 
 ### Prerequisites
-
 - **Python 3.8+**
-- A webcam and microphone
-- Operatins System: Windows, Linux, or macOS
+- Webcam & Microphone
+- Windows / Linux / macOS
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/networking-project.git
-   cd networking-project
-   ```
+```bash
+# Clone the repository
+git clone https://github.com/SHJony121/Networking.git
+cd Networking
 
-2. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-   > **⚠️ Note for Windows Users:** If `pip install PyAudio` fails, please download the correct `.whl` file from [Christoph Gohlke's Library](https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio) and install it manually.
+# Install dependencies
+pip install -r requirements.txt
+```
 
----
+> **Note:** On Windows, if `pip install PyAudio` fails, install it from a `.whl` file [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio).
 
-## 📖 Usage Guide
+### Running Use
 
-### 1. Start the Server
-The server must be running to handle connections.
+**1. Start the Server:**
 ```bash
 cd server
 python server_main.py
 ```
-*The server listens on **TCP:5000** containing control logic and **UDP:5001** for media streaming.*
 
-### 2. Start the Client
-Open a new terminal for each user.
+**2. Start Client(s):**
 ```bash
 cd client
 python main.py
 ```
 
-### 3. Connect & Collaborate
-- **Host:** Enter your name -> Click **"Start Meeting"** -> Share the **6-digit Code**.
-- **Guest:** Enter your name -> Enter the **Code** -> Click **"Join Meeting"**.
+<br/>
 
----
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
+</p>
 
-## 🔧 Technical Highlights
+## �‍💻 Authors
 
-This project serves as a comprehensive example of advanced network programming:
+<p align="center" id="-authors">
+  <a href="https://github.com/Mdsadmansakib">
+    <img src="https://github.com/Mdsadmansakib.png" width="100" height="100" style="border-radius:50%"/>
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/SHJony121">
+    <img src="https://github.com/SHJony121.png" width="100" height="100" style="border-radius:50%"/>
+  </a>
+</p>
 
-| Concept | Implementation |
-|---------|----------------|
-| **Streaming** | Custom UDP protocol with binary headers for video/audio frames. |
-| **Reliability** | TCP for critical control signals (Join/Leave/Chat). |
-| **Congestion Control** | **TCP Reno** algorithm implemented at the application layer for file transfers. |
-| **Traffic Shaping** | Token bucket / Sleep injection to control transmission rates. |
-| **Concurrency** | Extensive use of Python `threading` to handle UI, Net-I/O, and AV processing simultaneously. |
+<p align="center">
+  <a href="https://github.com/Mdsadmansakib"><strong>Md. Sadman Sakib</strong></a>
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <a href="https://github.com/SHJony121"><strong>Shahria Hasan Jony</strong></a>
+</p>
 
----
+<p align="center">
+  <a href="https://github.com/Mdsadmansakib">
+    <img src="https://img.shields.io/badge/GitHub-Mdsadmansakib-181717?style=flat-square&logo=github" alt="GitHub"/>
+  </a>
+  &nbsp;
+  <a href="https://github.com/SHJony121">
+    <img src="https://img.shields.io/badge/GitHub-SHJony121-181717?style=flat-square&logo=github" alt="GitHub"/>
+  </a>
+</p>
 
-## 👥 Authors
-
-- **Md. Sadman Sakib** - [GitHub](https://github.com/Mdsadmansakib)
-- **Shahria Hasan Jony** - [GitHub](https://github.com/SHJony121)
+<br/>
 
 ---
 
 <p align="center">
-  <i>Built for the Computer Networking Project</i>
+  <strong>Built with ❤️ using Python Sockets</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Made_with-Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Sockets-TCP_&_UDP-10B981?style=for-the-badge" alt="Sockets">
 </p>
