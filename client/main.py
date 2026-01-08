@@ -291,9 +291,9 @@ class ClientApplication(QStackedWidget):
         camera_index = int(os.environ.get('CAMERA_INDEX', 0))
         print(f"[Client] Using camera index: {camera_index}")
         
-        self.video_sender = VideoSender(
             self.server_host, 
             self.server_udp_port, 
+            client_name=self.client_name,
             camera_index=camera_index,
             simulated_loss_rate=self.simulated_loss_rate
         )
@@ -403,17 +403,12 @@ class ClientApplication(QStackedWidget):
                       f"camera_on={participants_with_camera_on}, "
                       f"camera_status={self.participant_camera_status}")
             
-            # Assign received frames to participant boxes with camera ON
-            frame_list = list(sender_frames.values())
-            
-            # Only update if we have frames AND participants with camera ON
-            if frame_list and participants_with_camera_on:
-                # For now, just show the latest received frame in the first participant box
-                # (This is a limitation - we can't distinguish which frame belongs to which participant
-                # without proper UDP address mapping, which requires REGISTER_UDP to work properly)
-                for idx, participant_id in enumerate(participants_with_camera_on):
-                    if idx < len(frame_list):
-                        self.meeting_screen.update_video_frame(participant_id, frame_list[idx])
+            # Assign received frames to participant boxes
+            # Now we can match directly because frames are keyed by source_id (participant_name)
+            for participant_id in participants_with_camera_on:
+                if participant_id in sender_frames:
+                    frame = sender_frames[participant_id]
+                    self.meeting_screen.update_video_frame(participant_id, frame)
     
     def on_send_chat(self, message_data):
         """Send chat message"""
@@ -584,8 +579,6 @@ class ClientApplication(QStackedWidget):
     def on_participant_left(self, msg):
         """Handle participant left"""
         participant_name = msg.get('participant_name')
-        if self.meeting_screen:
-            self.meeting_screen.remove_video_stream(participant_name)
         if self.meeting_screen:
             self.meeting_screen.remove_video_stream(participant_name)
             self.meeting_screen.remove_participant_from_list(participant_name)

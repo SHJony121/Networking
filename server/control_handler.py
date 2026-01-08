@@ -55,6 +55,21 @@ class ControlHandler:
             traceback.print_exc()
         
         finally:
+            # Broadcast that participant left (if they were in a meeting)
+            # This ensures others are notified even if the client crashed/disconnected abruptly
+            client_info = self.meeting_manager.get_client_info(client_socket)
+            if client_info:
+                meeting_code = client_info.get('meeting')
+                participant_name = client_info.get('name')
+                
+                if meeting_code and participant_name:
+                    self.broadcast_to_meeting(
+                        meeting_code,
+                        MSG_PARTICIPANT_LEFT,
+                        participant_name=participant_name,
+                        exclude_socket=client_socket
+                    )
+
             # Clean up when client disconnects
             self.meeting_manager.leave_meeting(client_socket)
             try:

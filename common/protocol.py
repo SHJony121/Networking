@@ -44,26 +44,40 @@ MSG_CAMERA_STATUS_BROADCAST = "CAMERA_STATUS_BROADCAST"  # Broadcast camera stat
 # Video Packet Format (UDP)
 # ============================================================================
 # Header: [frame_id (4 bytes)][timestamp (8 bytes)][sequence_num (4 bytes)]
-#         [width (2 bytes)][height (2 bytes)][payload_size (4 bytes)][payload]
+#         [width (2 bytes)][height (2 bytes)][payload_size (4 bytes)]
+#         [source_id (16 bytes)][payload]
 
-VIDEO_HEADER_SIZE = 24  # 4 + 8 + 4 + 2 + 2 + 4
+VIDEO_HEADER_SIZE = 40  # 4 + 8 + 4 + 2 + 2 + 4 + 16
 
-def pack_video_header(frame_id, timestamp, sequence_num, width, height, payload_size):
+def pack_video_header(frame_id, timestamp, sequence_num, width, height, payload_size, source_id):
     """Pack video header into bytes"""
-    return struct.pack('!IQIHHi', frame_id, timestamp, sequence_num, width, height, payload_size)
+    # Ensure source_id is exactly 16 bytes
+    if isinstance(source_id, str):
+        source_id = source_id.encode('utf-8')
+    source_id = source_id[:16].ljust(16, b'\x00')
+    
+    return struct.pack('!IQIHHi16s', frame_id, timestamp, sequence_num, width, height, payload_size, source_id)
 
 def unpack_video_header(data):
     """Unpack video header from bytes"""
     if len(data) < VIDEO_HEADER_SIZE:
         raise ValueError(f"Invalid video header size: {len(data)}")
-    frame_id, timestamp, sequence_num, width, height, payload_size = struct.unpack('!IQIHHi', data[:VIDEO_HEADER_SIZE])
+    frame_id, timestamp, sequence_num, width, height, payload_size, source_id_bytes = struct.unpack('!IQIHHi16s', data[:VIDEO_HEADER_SIZE])
+    
+    # Decode source_id
+    try:
+        source_id = source_id_bytes.decode('utf-8').rstrip('\x00')
+    except:
+        source_id = "unknown"
+        
     return {
         'frame_id': frame_id,
         'timestamp': timestamp,
         'sequence_num': sequence_num,
         'width': width,
         'height': height,
-        'payload_size': payload_size
+        'payload_size': payload_size,
+        'source_id': source_id
     }
 
 # ============================================================================

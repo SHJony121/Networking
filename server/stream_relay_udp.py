@@ -64,6 +64,7 @@ class StreamRelayUDP:
                     expected_payload_size = header['payload_size']
                     actual_payload_size = len(data) - VIDEO_HEADER_SIZE
                     
+                    
                     if expected_payload_size == actual_payload_size:
                         self.relay_video_packet(data, sender_addr)
                         return

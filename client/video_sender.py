@@ -16,9 +16,10 @@ from common.protocol import *
 class VideoSender:
     """Captures video and sends it to server via UDP"""
     
-    def __init__(self, server_host, server_udp_port, camera_index=0, simulated_loss_rate=0.0):
+    def __init__(self, server_host, server_udp_port, client_name="unknown", camera_index=0, simulated_loss_rate=0.0):
         self.server_host = server_host
         self.server_udp_port = server_udp_port
+        self.client_name = client_name
         self.camera_index = camera_index
         self.simulated_loss_rate = simulated_loss_rate
         
@@ -234,7 +235,8 @@ class VideoSender:
                 self.sequence_num,
                 width,
                 height,
-                len(payload)
+                len(payload),
+                self.client_name
             )
             
             # Send packet

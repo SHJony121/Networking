@@ -126,7 +126,9 @@ class VideoReceiver:
             
             # Check for lost frames - track per sender to avoid false positives
             # when receiving interleaved packets from multiple senders
-            sender_key = addr  # Use sender address as key
+            source_id = header['source_id']
+            sender_key = source_id  # Use source_id (client name) as key instead of addr
+            
             last_seq = self.sender_sequence.get(sender_key, -1)
             
             if last_seq != -1:
@@ -162,7 +164,7 @@ class VideoReceiver:
                 
                 # Store frame per sender
                 with self.sender_frames_lock:
-                    self.sender_frames[addr] = frame
+                    self.sender_frames[source_id] = frame
                 
                 # Update stats
                 self.frames_received += 1
